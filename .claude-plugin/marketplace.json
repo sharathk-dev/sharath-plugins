@@ -1,0 +1,27 @@
+{
+  "name": "sharath-plugins",
+  "owner": {
+    "name": "sharath",
+    "url": "https://github.com/sharathk-dev"
+  },
+  "plugins": [
+    {
+      "name": "blast-preview",
+      "source": "./plugins/blast-preview",
+      "description": "Shows what a destructive shell command would delete or discard, inside Claude Code's own permission prompt."
+    },
+    {
+      "name": "jira-tasks",
+      "source": "./plugins/jira-tasks",
+      "description": "/jira shows your open Jira tasks as a card in the chat, with their open PRs"
+    },
+    {
+      "name": "pr-status",
+      "source": "./plugins/pr-status",
+      "description": "/pr shows your open PRs and review requests as a card in the chat: review threads, CI, conflicts, stacked PRs, Jira status"
+    }
+  ],
+  "metadata": {
+    "description": "Personal Claude Code plugins."
+  }
+}

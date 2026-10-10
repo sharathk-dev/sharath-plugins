@@ -1,0 +1,9 @@
+{
+  "name": "blast-preview",
+  "version": "0.1.0",
+  "description": "Shows what a destructive shell command would delete or discard, inside Claude Code's own permission prompt.",
+  "author": {
+    "name": "sharath",
+    "url": "https://github.com/sharathk-dev"
+  }
+}

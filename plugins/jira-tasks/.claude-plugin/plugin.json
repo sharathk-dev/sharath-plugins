@@ -1,0 +1,10 @@
+{
+  "name": "jira-tasks",
+  "version": "0.4.0",
+  "description": "/jira shows your open Jira tasks as a card in the chat, with their open PRs",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "sharath",
+    "url": "https://github.com/sharathk-dev"
+  }
+}
