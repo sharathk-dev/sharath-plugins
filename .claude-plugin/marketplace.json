@@ -33,7 +33,7 @@
     {
       "name": "tldr",
       "source": "./plugins/tldr",
-      "description": "Short summary band above the prompt after long answers"
+      "description": "TL;DR card under long answers in the transcript"
     }
   ],
   "metadata": {

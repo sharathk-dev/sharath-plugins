@@ -8,7 +8,7 @@ Personal Claude Code plugins.
 | [pr-status](plugins/pr-status/README.md) | `/pr` shows your open PRs and review requests as a card in the chat: review threads, CI, conflicts, stacked PRs, Jira status. |
 | [standup](plugins/standup/README.md) | `/standup` shows what you did since yesterday as one card: GitHub commits, PRs and Jira tickets, with a button to draft the update. |
 | [test-watcher](plugins/test-watcher/README.md) | Compact card and compact model-facing summary for Maven and Gradle test runs; the full log is saved to a file. |
-| [tldr](plugins/tldr/README.md) | Short summary band above the prompt after long answers. |
+| [tldr](plugins/tldr/README.md) | TL;DR card under long answers in the transcript. |
 | [blast-preview](plugins/blast-preview/README.md) | Shows what a destructive shell command would delete or discard, inside Claude Code's permission prompt. |
 
 ## Install

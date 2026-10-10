@@ -1,7 +1,7 @@
 {
   "name": "tldr",
-  "version": "0.1.0",
-  "description": "Short summary band above the prompt after long answers",
+  "version": "0.1.1",
+  "description": "TL;DR card under long answers in the transcript",
   "types": "./types/index.d.ts",
   "author": {
     "name": "sharath",
