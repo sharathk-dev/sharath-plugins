@@ -1,0 +1,39 @@
+> Task :compileJava UP-TO-DATE
+> Task :processResources NO-SOURCE
+> Task :classes UP-TO-DATE
+> Task :compileTestJava
+> Task :processTestResources NO-SOURCE
+> Task :testClasses
+
+> Task :test FAILED
+
+CalculatorTest > add() FAILED
+    org.opentest4j.AssertionFailedError: expected: <5> but was: <-1>
+        at app//org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+        at app//org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+        at app//org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+        at app//org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:150)
+        at app//org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:531)
+        at app//com.example.playground.CalculatorTest.add(CalculatorTest.java:14)
+        at java.base@21.0.2/java.lang.reflect.Method.invoke(Method.java:580)
+        at java.base@21.0.2/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+com.example.playground.BoomTest > explodes() FAILED
+    java.lang.NullPointerException: Cannot invoke "Object.toString()" because "o" is null
+        at app//com.example.playground.BoomTest.explodes(BoomTest.java:10)
+        at java.base@21.0.2/java.lang.reflect.Method.invoke(Method.java:580)
+
+4 tests completed, 2 failed, 1 skipped
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':test'.
+> There were failing tests. See the report at: file:///home/user/project/build/reports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 2s
+3 actionable tasks: 1 executed, 2 up-to-date

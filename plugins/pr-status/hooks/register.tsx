@@ -412,13 +412,13 @@ export const register: Register = on => {
     const conflictMark = '⚠ conflict'
     const fraction = (t: Threads) => `${t.resolved}/${t.total}`
     const waitingMark = (t: Threads) => (t.waiting ? ` ●${t.waiting}` : '')
-    // One signals column (threads, conflict, CI) as wide as the busiest row, right-aligned against the review label;
+    // One signals column (threads, conflict, CI) as wide as the busiest row, left-aligned just before the review label;
     // its parts are two spaces apart. No row with a signal, no column.
     const signalLength = (r: PrRow) => {
       const parts = [r.threads ? fraction(r.threads).length + waitingMark(r.threads).length : 0, r.conflict ? cells(conflictMark) : 0, r.ci ? 1 : 0].filter(Boolean)
       return parts.reduce((sum, n) => sum + n, 0) + 2 * Math.max(0, parts.length - 1)
     }
-    const signalsWidth = Math.max(0, ...rows.map(signalLength)) + (rows.some(r => r.conflict) ? 2 : 0)
+    const signalsWidth = Math.max(0, ...rows.map(signalLength))
     // A stacked PR whose base isn't listed ends with ` on feature/x`.
     // A stacked PR's tree glyph leads its title (`└─ `, `├─ ` when a sibling follows), three cells deeper per level.
     const treeOf = (list: PrRow[], i: number) => {
@@ -504,7 +504,7 @@ export const register: Register = on => {
                       </Box>
                     )}
                     {signalsWidth > 0 && (
-                      <Box width={signalsWidth} flexShrink={0} flexDirection="row" justifyContent="flex-end" gap={2}>
+                      <Box width={signalsWidth} flexShrink={0} flexDirection="row" gap={2}>
                         {r.threads && (
                           <Text>
                             <Text color={r.threads.resolved < r.threads.total ? 'yellow' : 'gray'}>{fraction(r.threads)}</Text>

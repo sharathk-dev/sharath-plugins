@@ -182,7 +182,7 @@ test('/pr does not call Jira when no PR names an issue', async ($, on) => {
   expect(out).not.toContain('Jira')
 })
 
-test('/pr draws one right-aligned signals column, and none when no row has a signal', async ($, on) => {
+test('/pr draws one left-aligned signals column, and none when no row has a signal', async ($, on) => {
   mock.clock(on)
   on('tool.list', async () => tools('Read'))
   const bare = { nodes: [{ commit: { statusCheckRollup: null } }] }
@@ -195,7 +195,28 @@ test('/pr draws one right-aligned signals column, and none when no row has a sig
   expect(await ui.find({ type: 'Text', text: '1/3' })).toBeDefined()
   const drawn = JSON.stringify(await ui.drawn())
   expect(drawn).not.toMatch(/[✓✗]/)
-  expect(drawn).toContain('"justifyContent":"flex-end"')
+  expect(drawn).not.toContain('"justifyContent":"flex-end"')
+})
+
+test('/pr gives every row the same signals width, as wide as the longest signals text', async ($, on) => {
+  mock.clock(on)
+  on('tool.list', async () => tools('Read'))
+  const bare = { nodes: [{ commit: { statusCheckRollup: null } }] }
+  on('process.run', async () => gh([
+    node({ number: 1, title: 'Conflicted', mergeable: 'CONFLICTING', commits: bare }),
+    node({ number: 2, title: 'Threads', commits: bare, reviewThreads: { nodes: [thread(false, 'bob'), thread(true, 'me'), thread(true, 'me')] } }),
+    node({ number: 3, title: 'Nothing', commits: bare }),
+  ]))
+  const { text: out } = await $.command.run(RUN)
+  const ui = await mount($, out ?? '')
+  const columns: any[] = []
+  const walk = (n: any) => {
+    if (n?.type === 'Box' && n.props?.gap === 2 && n.props?.flexShrink === 0) columns.push(n)
+    for (const c of Array.isArray(n?.children) ? n.children : []) walk(c)
+  }
+  walk(await ui.drawn())
+  expect(columns.map(c => c.props.width)).toEqual([11, 11, 11])
+  expect(columns.some(c => c.props.justifyContent === 'flex-end')).toBe(false)
 })
 
 test('/pr draws threads, conflict and CI together on one row', async ($, on) => {

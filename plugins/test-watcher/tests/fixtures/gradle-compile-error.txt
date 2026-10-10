@@ -1,0 +1,19 @@
+> Task :compileJava FAILED
+/home/user/project/src/main/java/com/example/playground/Calculator.java:10: error: cannot find symbol
+        return a - bb;
+                   ^
+  symbol:   variable bb
+  location: class Calculator
+/home/user/project/src/main/java/com/example/playground/Calculator.java:14: error: incompatible types: String cannot be converted to int
+        return "x";
+               ^
+2 errors
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':compileJava'.
+> Compilation failed; see the compiler output below.
+
+BUILD FAILED in 780ms
+1 actionable task: 1 executed

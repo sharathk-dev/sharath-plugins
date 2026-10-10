@@ -19,6 +19,21 @@
       "name": "pr-status",
       "source": "./plugins/pr-status",
       "description": "/pr shows your open PRs and review requests as a card in the chat: review threads, CI, conflicts, stacked PRs, Jira status"
+    },
+    {
+      "name": "standup",
+      "source": "./plugins/standup",
+      "description": "/standup shows what you did since yesterday as one card: GitHub commits, PRs and Jira tickets, with a button to draft the update"
+    },
+    {
+      "name": "test-watcher",
+      "source": "./plugins/test-watcher",
+      "description": "Compact card and compact model-facing summary for Maven and Gradle test runs; the full log is saved to a file"
+    },
+    {
+      "name": "tldr",
+      "source": "./plugins/tldr",
+      "description": "Short summary band above the prompt after long answers"
     }
   ],
   "metadata": {

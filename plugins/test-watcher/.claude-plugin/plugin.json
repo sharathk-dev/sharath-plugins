@@ -1,0 +1,10 @@
+{
+  "name": "test-watcher",
+  "version": "0.1.0",
+  "description": "Compact card and compact model-facing summary for Maven and Gradle test runs; the full log is saved to a file",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "sharath",
+    "url": "https://github.com/sharathk-dev"
+  }
+}

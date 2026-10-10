@@ -1,0 +1,10 @@
+{
+  "name": "standup",
+  "version": "0.1.0",
+  "description": "/standup shows what you did on the last working day as one card: GitHub commits, PRs opened, merged or reviewed, and Jira tickets you moved, with a button that drafts the standup update",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "sharath",
+    "url": "https://github.com/sharathk-dev"
+  }
+}
