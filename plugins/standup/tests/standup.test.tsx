@@ -90,7 +90,7 @@ test('/standup shows commits, PRs and Jira since Friday on a Monday, in two Grap
   expect(await ui.find({ type: 'Text', text: /◎ reviewed/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'PRs' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Jira (1)' })).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: '→ In Review' }))?.props?.color).toBe('magenta')
+  expect((await ui.find({ type: 'Text', text: 'In Review' }))?.props?.color).toBe('magenta')
   expect(await ui.find({ type: 'Text', text: /Jira unavailable/ })).toBeUndefined()
 })
 
@@ -289,7 +289,7 @@ test('every section lists the newest first', async ($, on) => {
   expect(lines.filter(l => l.includes('KAN-')).map(l => l.slice(2, 14))).toEqual(['[KAN-2](http', '[KAN-3](http', '[KAN-1](http'])
 })
 
-test('the Jira status column is one fixed width, left-aligned, so every arrow starts in the same column', async ($, on) => {
+test('the Jira status column is one fixed width and left-aligned, like the /jira card', async ($, on) => {
   mock.clock(on, { now: NOW })
   on('tool.list', async () => tools(...JIRA_TOOLS))
   fakeGh(on)
@@ -304,13 +304,12 @@ test('the Jira status column is one fixed width, left-aligned, so every arrow st
   const ui = await mount($, text ?? '')
   const cells: any[] = []
   const walk = (n: any) => {
-    if (n?.type === 'Box' && n.props?.flexShrink === 0 && (Array.isArray(n.children) ? n.children : []).some((c: any) => /^→ /.test(String(c?.children?.[0] ?? c?.text ?? '')))) cells.push(n)
+    if (n?.type === 'Box' && n.props?.flexShrink === 0 && (Array.isArray(n.children) ? n.children : []).some((c: any) => /^(In Review|Done) *$/.test(String(c?.children?.[0] ?? c?.text ?? '')))) cells.push(n)
     for (const c of Array.isArray(n?.children) ? n.children : []) walk(c)
   }
   walk(await ui.drawn())
-  expect(cells.map(c => c.props.width)).toEqual([11, 11])
-  expect(cells.some(c => c.props.justifyContent === 'flex-end')).toBe(false)
-  expect(await ui.find({ type: 'Text', text: '→ Done' })).toBeDefined()
+  expect(cells.map(c => c.props.width)).toEqual([9, 9])
+  expect(await ui.find({ type: 'Text', text: 'Done     ' })).toBeDefined()
 })
 
 test('commit headlines also come from the head branches of my PRs, deduped by oid and newest first', async ($, on) => {

@@ -3,6 +3,19 @@ import type { EngineInterface, Register } from 'claude-code'
 
 const CARD_WIDTH = 100
 
+const GRADIENT = [
+  [255, 95, 162],
+  [217, 70, 239],
+  [96, 165, 250],
+]
+
+function gradientColor(i: number, n: number): string {
+  const pos = (n <= 1 ? 0 : i / (n - 1)) * (GRADIENT.length - 1)
+  const k = Math.min(GRADIENT.length - 2, Math.floor(pos))
+  const mix = GRADIENT[k]!.map((c, j) => Math.round(c + (GRADIENT[k + 1]![j]! - c) * (pos - k)))
+  return `#${mix.map(c => c.toString(16).padStart(2, '0')).join('')}`
+}
+
 import type { PullRequest, Task } from '../types'
 
 const JQL = 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC'
@@ -346,9 +359,9 @@ export const register: Register = on => {
     }
 
     return (
-      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} marginTop={1} width={width}>
+      <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1} marginTop={1} width={width}>
         <Box flexDirection="row" justifyContent="space-between" marginBottom={1}>
-          <Text bold>Jira tasks</Text>
+          <Text>{[...'Jira tasks'].map((ch, i) => <Text key={i} bold color={gradientColor(i, 'Jira tasks'.length)}>{ch}</Text>)}</Text>
           <Text dimColor>
             {card.count} open · {card.time}
           </Text>
@@ -396,7 +409,7 @@ export const register: Register = on => {
                   )}
                 </Box>
               )}
-              <Text color={colourFor(r.status, r.category)}>{r.status.padStart(statusWidth)}</Text>
+              <Text color={colourFor(r.status, r.category)}>{r.status.padEnd(statusWidth)}</Text>
             </Box>
           )
         })}

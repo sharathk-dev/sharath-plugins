@@ -5,6 +5,19 @@ import type { CommitRepo, JiraItem, PrItem, Report, Win } from './standup'
 
 const CARD_WIDTH = 100
 
+const GRADIENT = [
+  [255, 95, 162],
+  [217, 70, 239],
+  [96, 165, 250],
+]
+
+function gradientColor(i: number, n: number): string {
+  const pos = (n <= 1 ? 0 : i / (n - 1)) * (GRADIENT.length - 1)
+  const k = Math.min(GRADIENT.length - 2, Math.floor(pos))
+  const mix = GRADIENT[k]!.map((c, j) => Math.round(c + (GRADIENT[k + 1]![j]! - c) * (pos - k)))
+  return `#${mix.map(c => c.toString(16).padStart(2, '0')).join('')}`
+}
+
 const cloud = atom({ plugin: 'standup', key: 'cloudId' } as const, '')
 const siteUrl = atom({ plugin: 'standup', key: 'site' } as const, '')
 
@@ -318,18 +331,19 @@ export const register: Register = on => {
     const cut = (text: string, n: number) => (text.length <= n ? text : `${text.slice(0, Math.max(1, n - 1)).trimEnd()}…`)
     const repoWidth = Math.min(18, Math.max(0, ...report.commits.map(c => c.repo.length), ...report.prs.map(p => p.repo.length)))
     const empty = isEmpty(report)
+    const title = empty ? `Nothing found for ${report.label}` : `Standup · ${report.label}`
     const commitCount = totalCommits(report)
 
     const MARK: Record<string, { mark: string; colour: string }> = {
-      merged: { mark: '✓ merged', colour: 'magenta' },
-      opened: { mark: '↑ opened', colour: 'green' },
-      reviewed: { mark: '◎ reviewed', colour: 'cyan' },
+      merged: { mark: '✓ merged', colour: 'green' },
+      opened: { mark: '↑ opened', colour: 'magenta' },
+      reviewed: { mark: '◎ reviewed', colour: 'blue' },
     }
     const kindWidth = Math.max(0, ...report.prs.map(p => MARK[p.kind]!.mark.length))
     const numWidth = Math.max(0, ...report.prs.map(p => `#${p.number}`.length))
     const keyWidth = Math.max(0, ...report.jira.map(j => j.key.length))
     const statusCut = (s: string) => (s.length <= 16 ? s : `${s.slice(0, 15).trimEnd()}…`)
-    const statusWidth = Math.max(0, ...report.jira.map(j => statusCut(j.status).length + 2))
+    const statusWidth = Math.max(0, ...report.jira.map(j => statusCut(j.status).length))
 
     const commitText = (c: { count: number; messages: string[] }) => {
       if (c.messages.length === 0) return `${c.count} commit${c.count === 1 ? '' : 's'}`
@@ -339,9 +353,9 @@ export const register: Register = on => {
     }
 
     return (
-      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} marginTop={1} width={width}>
+      <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1} marginTop={1} width={width}>
         <Box flexDirection="row" justifyContent="space-between">
-          <Text bold>{empty ? `Nothing found for ${report.label}` : `Standup · ${report.label}`}</Text>
+          <Text>{[...title].map((ch, i) => <Text key={i} bold color={gradientColor(i, title.length)}>{ch}</Text>)}</Text>
           <Text dimColor>{report.jiraDown ? '· Jira unavailable' : ''}</Text>
         </Box>
         {report.commits.length > 0 && (
@@ -398,7 +412,7 @@ export const register: Register = on => {
                 <Text wrap="truncate">{cut(j.summary, inner - 2 - keyWidth - statusWidth - 2)}</Text>
                 <Box flexGrow={1} />
                 <Box width={statusWidth} flexShrink={0}>
-                  <Text color={ISSUE_STATUS_COLOUR(j.status, (j.category as Category) || '')}>{`→ ${statusCut(j.status)}`}</Text>
+                  <Text color={ISSUE_STATUS_COLOUR(j.status, (j.category as Category) || '')}>{statusCut(j.status).padEnd(statusWidth)}</Text>
                 </Box>
               </Box>
             ))}

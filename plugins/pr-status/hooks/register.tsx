@@ -3,6 +3,19 @@ import type { EngineInterface, Register } from 'claude-code'
 
 const CARD_WIDTH = 100
 
+const GRADIENT = [
+  [255, 95, 162],
+  [217, 70, 239],
+  [96, 165, 250],
+]
+
+function gradientColor(i: number, n: number): string {
+  const pos = (n <= 1 ? 0 : i / (n - 1)) * (GRADIENT.length - 1)
+  const k = Math.min(GRADIENT.length - 2, Math.floor(pos))
+  const mix = GRADIENT[k]!.map((c, j) => Math.round(c + (GRADIENT[k + 1]![j]! - c) * (pos - k)))
+  return `#${mix.map(c => c.toString(16).padStart(2, '0')).join('')}`
+}
+
 const cloud = atom({ plugin: 'pr-status', key: 'cloudId' } as const, '')
 const siteUrl = atom({ plugin: 'pr-status', key: 'site' } as const, '')
 
@@ -366,7 +379,7 @@ function prBoardFromMarkdown(text: string): { head: string; jiraDown: boolean; s
   return { head: head[1]!, jiraDown: Boolean(head[2]), sections }
 }
 
-const REVIEW_COLOUR: Record<Review, string> = { Approved: 'green', Changes: 'red', Review: 'yellow', Draft: 'gray' }
+const REVIEW_COLOUR: Record<Review, string> = { Approved: 'green', Changes: 'red', Review: 'magenta', Draft: 'yellow' }
 const CI_MARK: Record<Ci, { mark: string; colour: string }> = {
   passing: { mark: '✓', colour: 'green' },
   failing: { mark: '✗', colour: 'red' },
@@ -441,9 +454,9 @@ export const register: Register = on => {
     const cut = (text: string, n: number) => (text.length <= n ? text : `${text.slice(0, n - 1).trimEnd()}…`)
 
     return (
-      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} marginTop={1} width={width}>
+      <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1} marginTop={1} width={width}>
         <Box flexDirection="row" justifyContent="space-between">
-          <Text bold>Pull requests</Text>
+          <Text>{[...'Pull requests'].map((ch, i) => <Text key={i} bold color={gradientColor(i, 'Pull requests'.length)}>{ch}</Text>)}</Text>
           <Text dimColor>{board.head + (board.jiraDown ? ' · Jira unavailable' : '')}</Text>
         </Box>
         {rows.length === 0 && <Text dimColor>No open PRs, and nothing waiting on your review.</Text>}
@@ -520,7 +533,7 @@ export const register: Register = on => {
                       </Box>
                     )}
                     <Box width={reviewWidth} flexShrink={0}>
-                      <Text color={REVIEW_COLOUR[r.review]} wrap="truncate">{r.review.padStart(reviewWidth)}</Text>
+                      <Text color={REVIEW_COLOUR[r.review]} wrap="truncate">{r.review.padEnd(reviewWidth)}</Text>
                     </Box>
                   </Box>
                   {r.failing && r.failing.length > 0 && (

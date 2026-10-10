@@ -86,7 +86,7 @@ test('colours and orders custom board statuses by their Jira category', async ($
     plugin: 'jira-tasks', surface: 'terminal', component: 'CommandOutput',
     props: { command: 'jira', args: '', text: out ?? '', isErrored: false },
   })
-  const colour = async (status: string) => (await ui.find({ type: 'Text', text: new RegExp(`^\\s*${status}$`) }))?.props?.color
+  const colour = async (status: string) => (await ui.find({ type: 'Text', text: new RegExp(`^${status}\\s*$`) }))?.props?.color
   expect(await colour('Waiting on vendor hold')).toBe('red')
   expect(await colour('QA')).toBe('magenta')
   expect(await colour('Doing')).toBe('yellow')
