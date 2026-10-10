@@ -25,6 +25,8 @@ function setup($: any, on: any, _unused: unknown, writes?: Record<string, unknow
 const done = (over: Record<string, unknown> = {}) =>
   ({ answer: long, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', ...over }) as any
 
+const CARD = '"borderColor":"magenta"'
+
 const band = ($: any, text = long) =>
   $.ui.mount({ plugin: 'tldr', surface: 'terminal', component: 'AssistantMessage', props: { text, isFirstOfReply: true } } as any)
 
@@ -34,7 +36,7 @@ test('short answer shows no card', async ($, on) => {
   setup($, on, null)
   await $.turn.complete(done({ answer: 'ok' }))
   const ui = await band($)
-  expect(JSON.stringify(await ui.drawn())).not.toContain('TL;DR')
+  expect(JSON.stringify(await ui.drawn())).not.toContain(CARD)
 })
 
 test('the card needs 12 non-empty lines or 1200 characters', async ($, on) => {
@@ -43,7 +45,7 @@ test('the card needs 12 non-empty lines or 1200 characters', async ($, on) => {
   const shows = async (answer: string) => {
     await $.turn.complete(done({ answer }))
     await clock.settle()
-    return JSON.stringify(await (await band($, answer)).drawn()).includes('TL;DR')
+    return JSON.stringify(await (await band($, answer)).drawn()).includes(CARD)
   }
   const lines = (n: number) => Array.from({ length: n }, (_, i) => `line number ${i} of the answer`).join('\n')
   expect(await shows(lines(11))).toBe(false)
@@ -59,7 +61,7 @@ test('long answer shows parsed DONE / NEEDS YOU / NOTE', async ($, on) => {
   await $.turn.complete(done())
   const ui = await band($)
   const drawn = JSON.stringify(await ui.drawn())
-  expect(drawn).toContain('TL;DR')
+  expect(drawn).toContain(CARD)
   expect(drawn).toContain('"children":["✓"]')
   expect(drawn).toContain('Refactored the parser')
   expect(drawn).toContain('"children":["✔︎ verified:"]')
@@ -78,7 +80,7 @@ test('subagent turn is ignored', async ($, on) => {
   setup($, on, null)
   modelReturns(on, { isAnswered: true, text: REPLY })
   await $.turn.complete(done({ agentId: 'sub1' }))
-  expect(JSON.stringify(await (await band($)).drawn())).not.toContain('TL;DR')
+  expect(JSON.stringify(await (await band($)).drawn())).not.toContain(CARD)
 })
 
 test('the next prompt keeps the card of the past answer', async ($, on) => {
@@ -87,14 +89,14 @@ test('the next prompt keeps the card of the past answer', async ($, on) => {
   await $.turn.complete(done())
   await clock.settle()
   await $.prompt.submit({ text: 'next' } as any)
-  expect(JSON.stringify(await (await band($)).drawn())).toContain('TL;DR')
+  expect(JSON.stringify(await (await band($)).drawn())).toContain(CARD)
 })
 
 test('failed model call shows nothing', async ($, on) => {
   setup($, on, null)
   modelReturns(on, { isAnswered: false, reason: 'error' })
   await $.turn.complete(done())
-  expect(JSON.stringify(await (await band($)).drawn())).not.toContain('TL;DR')
+  expect(JSON.stringify(await (await band($)).drawn())).not.toContain(CARD)
 })
 
 test('/tldr off persists and /tldr summarizes the last answer', async ($, on) => {
@@ -103,7 +105,7 @@ test('/tldr off persists and /tldr summarizes the last answer', async ($, on) =>
   const off = await $.command.run({ command: 'tldr', args: 'off' } as any)
   expect(off.text).toContain('off')
   await $.turn.complete(done())
-  expect(JSON.stringify(await (await band($)).drawn())).not.toContain('TL;DR')
+  expect(JSON.stringify(await (await band($)).drawn())).not.toContain(CARD)
   const r = await $.command.run({ command: 'tldr', args: '' } as any)
   expect(r.text).toContain('Pick a migration strategy')
 })
@@ -188,17 +190,24 @@ const second = Array.from({ length: 10 }, (_, i) => `line ${i + 10} of a long an
 
 const setView = ($: any, args: string) => $.command.run({ command: 'tldr', args } as any)
 
-test('toggle button flips the view and persists it', async ($, on) => {
+const footer = ($: any, modes: string[] = []) =>
+  $.ui.mount({ plugin: 'tldr', surface: 'terminal', component: 'SessionMode', props: { modes } } as any)
+
+test('one footer toggle flips the view and persists it; cards have no button', async ($, on) => {
   const writes: Record<string, unknown> = {}
   setup($, on, null, writes)
   modelReturns(on, { isAnswered: true, text: REPLY })
+  expect(JSON.stringify(await (await footer($)).drawn())).not.toContain('TL;DR only')
   await $.turn.complete(done())
-  let ui = await band($)
-  expect(JSON.stringify(await ui.drawn())).toContain('TL;DR only')
+  expect(JSON.stringify(await (await band($)).drawn())).not.toContain('TL;DR only')
+  let ui = await footer($, ['focus'])
+  const drawn = JSON.stringify(await ui.drawn())
+  expect(drawn).toContain('TL;DR only')
+  expect(drawn).toContain('focus')
   await ui.press({ key: 'view' })
   expect(writes.view).toBe('tldr')
-  ui = await band($)
-  expect(JSON.stringify(await ui.drawn())).toContain('show full answer')
+  ui = await footer($)
+  expect(JSON.stringify(await ui.drawn())).toContain('show full answers')
   await ui.press({ key: 'view' })
   expect(writes.view).toBe('full')
 })
@@ -234,11 +243,11 @@ test('full view: the last block draws the text plus the card, earlier blocks dra
   await $.turn.complete(done())
   const early = JSON.stringify(await (await block($, first)).drawn())
   expect(early).toContain('base')
-  expect(early).not.toContain('TL;DR')
+  expect(early).not.toContain(CARD)
   const last = JSON.stringify(await (await block($, second, { isFirstOfReply: false })).drawn())
   expect(last).toContain('base')
   expect(last).toContain('Refactored the parser')
-  expect(last.indexOf('base')).toBeLessThan(last.indexOf('TL;DR'))
+  expect(last.indexOf('base')).toBeLessThan(last.indexOf(CARD))
 })
 
 test('two answers each keep their own card', async ($, on) => {
@@ -265,7 +274,7 @@ test('pending summary shows summarizing… under the last block only', async ($,
   const last = JSON.stringify(await (await block($, second, { isFirstOfReply: false })).drawn())
   expect(last).toContain('base')
   expect(last).toContain('summarizing…')
-  expect(last).not.toContain('TL;DR')
+  expect(last).not.toContain(CARD)
 })
 
 test('/tldr refreshes the inline card of the last answer', async ($, on) => {
@@ -411,10 +420,9 @@ test('tldr view: a single-block answer shows the fold line, then the card with t
   expect(drawn).toContain('▸ answer folded (20 lines)')
   expect(drawn).toContain('✓ All done · took 1m 47s')
   expect(drawn).toContain('Refactored the parser')
-  expect(drawn).toContain('show full answer')
   expect(drawn).not.toContain('base')
-  expect(drawn.indexOf('folded')).toBeLessThan(drawn.indexOf('TL;DR'))
-  expect(drawn.indexOf('TL;DR')).toBeLessThan(drawn.indexOf('All done'))
+  expect(drawn.indexOf('folded')).toBeLessThan(drawn.indexOf(CARD))
+  expect(drawn.indexOf(CARD)).toBeLessThan(drawn.indexOf('All done'))
 })
 
 test('the done header is left out of the card in full view', async ($, on) => {
@@ -437,7 +445,7 @@ test('AbovePrompt draws nothing of its own when idle or finished, in both modes'
     await setView($, args)
     const after = await text(await wband($, { isWorking: false }))
     expect(after).toContain('base')
-    expect(after).not.toContain('TL;DR')
+    expect(after).not.toContain(CARD)
     expect(after).not.toContain('All done')
   }
 })
@@ -471,6 +479,6 @@ test('full mode keeps today\'s band while working', async ($, on) => {
   await $.turn.complete(done())
   const after = await text(await wband($, { isWorking: false }))
   expect(after).toContain('base')
-  expect(after).not.toContain('TL;DR')
+  expect(after).not.toContain(CARD)
 })
 

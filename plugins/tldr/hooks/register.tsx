@@ -196,8 +196,8 @@ async function clear($: any): Promise<void> {
 
 const count = (s: Summary) => (s.done ? 1 : 0) + (s.verified ? 1 : 0) + s.needs.length + s.notes.length
 
-function card($: any, e: any, entry: Entry, mode: 'full' | 'tldr', withButton = true) {
-  const { Box, Button, Text } = $.ui.resolve(e)
+function card($: any, e: any, entry: Entry, mode: 'full' | 'tldr') {
+  const { Box, Text } = $.ui.resolve(e)
   const s = entry.summary
   const label = 'TL;DR'
   const notRun = /not run/i.test(s.verified)
@@ -238,15 +238,6 @@ function card($: any, e: any, entry: Entry, mode: 'full' | 'tldr', withButton = 
           <Text dimColor>{` ${line}`}</Text>
         </Text>
       ))}
-      {withButton ? (
-        <Box flexDirection="row" justifyContent="flex-end">
-          <Button
-            key="view"
-            label={mode === 'tldr' ? 'show full answer' : 'TL;DR only'}
-            onPress={() => setView($, mode === 'tldr' ? 'full' : 'tldr')}
-          />
-        </Box>
-      ) : null}
     </Box>
   )
 }
@@ -300,7 +291,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'CommandOutput', props: { command: 'tldr' } }, async ($, e, next) => {
     const entry = fromCommandText(String(e.props.text ?? ''))
-    return entry ? card($, e, entry, 'full', false) : next(e)
+    return entry ? card($, e, entry, 'full') : next(e)
   })
 
   on('session.end', async ($, e, next) => {
@@ -425,6 +416,22 @@ export const register: Register = on => {
     }
     if (!isLast) return next(e)
     return <Box flexDirection="column">{await next(e)}{tail}</Box>
+  })
+
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    if ((await read($, records)).length === 0) return next(e)
+    const mode = await read($, view)
+    const { Box, Button, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="row" gap={1}>
+        {e.props.modes.length > 0 ? <Text dimColor>{e.props.modes.join(' & ')}</Text> : null}
+        <Button
+          key="view"
+          label={mode === 'tldr' ? 'show full answers' : 'TL;DR only'}
+          onPress={() => setView($, mode === 'tldr' ? 'full' : 'tldr')}
+        />
+      </Box>
+    )
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

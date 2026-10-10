@@ -27,12 +27,12 @@ The on/off and view choices are stored and survive restarts.
 
 ## View toggle
 
-A button at the bottom right of the card flips between two views. It is labelled with the view you would switch to.
+One button at the right end of the prompt footer, beside the mode labels, flips between two views for the whole transcript: `TL;DR only` or `show full answers`. It appears once an answer has been summarized. `/tldr only` and `/tldr full` do the same.
 
 | View | Transcript |
 |---|---|
-| `full` (default) | The long answer is shown in full, with the card under it. Button: `TL;DR only`. |
-| `tldr` | A summarized answer (the last 20) is folded to one dim line, `▸ answer folded (N lines) · TL;DR below · /tldr full to show`, followed by the card. Answers still being summarized, short answers and answers whose summary failed show as normal. Button: `show full answer`. |
+| `full` (default) | The long answer is shown in full, with the card under it. |
+| `tldr` | A summarized answer (the last 20) is folded to one dim line, `▸ answer folded (N lines) · TL;DR below · /tldr full to show`, followed by the card. Answers still being summarized, short answers and answers whose summary failed show as normal. |
 
 A folded answer stays folded until the view changes. Folding changes only the drawing: ctrl+o shows the full stored answer.
 
