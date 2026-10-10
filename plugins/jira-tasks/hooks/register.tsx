@@ -1,6 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+const CARD_WIDTH = 100
+
 import type { PullRequest, Task } from '../types'
 
 const JQL = 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC'
@@ -334,7 +336,8 @@ export const register: Register = on => {
     const extra = (r: Row) => (r.parent ? r.parent.length + 3 : 0)
     const rowWidth = Math.max(0, ...card.rows.map(r => chip + 1 + keyWidth + 1 + r.summary.length + extra(r) + 2 + prColumn + statusWidth))
     const headWidth = 'Jira tasks'.length + 2 + `${card.count} open · ${card.time}`.length
-    const width = Math.min(120, e.viewport?.columns ?? 120, Math.max(86, rowWidth, headWidth) + 4)
+    // Same fixed width as the other card (/jira and /pr), so they line up; narrower only on a narrow window.
+    const width = Math.min(CARD_WIDTH, e.viewport?.columns ?? CARD_WIDTH)
     // What's left for the summary once the tile, key, status, gaps, border and padding are placed.
     const room = Math.max(8, width - 4 - (chip + 1 + keyWidth + 1 + 2 + prColumn + statusWidth))
     const fit = (r: Row) => {

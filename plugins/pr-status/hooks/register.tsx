@@ -1,6 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+const CARD_WIDTH = 100
+
 const cloud = atom({ plugin: 'pr-status', key: 'cloudId' } as const, '')
 const siteUrl = atom({ plugin: 'pr-status', key: 'site' } as const, '')
 
@@ -431,7 +433,8 @@ export const register: Register = on => {
     const suffix = (r: PrRow) => (r.author ? ` · ${r.author}` : r.onBranch ? ` on ${r.onBranch}` : '')
     const columns = 4 + (keyColumn ? 1 : 0) + (signalsWidth ? 1 : 0)
     const fixed = numWidth + repoWidth + keyColumn + signalsWidth + reviewWidth + (columns - 1)
-    const width = Math.min(120, e.viewport?.columns ?? 120, Math.max(86, fixed + Math.max(0, ...rows.map(r => (prefixes.get(r)?.length ?? 0) + r.title.length + suffix(r).length)) + 1) + 4)
+    // Same fixed width as the other card (/jira and /pr), so they line up; narrower only on a narrow window.
+    const width = Math.min(CARD_WIDTH, e.viewport?.columns ?? CARD_WIDTH)
     const room = Math.max(8, width - 4 - fixed - 1)
     // The failing-checks line starts under the title column.
     const indent = numWidth + 1 + repoWidth + 1
