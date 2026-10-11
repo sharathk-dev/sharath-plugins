@@ -120,7 +120,6 @@ test('/tldr output renders as the card', async ($, on) => {
   expect(drawn).toContain('"borderColor":"magenta"')
   expect(drawn).toContain('● Pick a migration strategy')
   expect(drawn).toContain('mvn test: 11 pass')
-  expect(drawn).not.toContain('TL;DR only')
 })
 
 test('failed verification renders red', async ($, on) => {
@@ -193,22 +192,23 @@ const setView = ($: any, args: string) => $.command.run({ command: 'tldr', args 
 const footer = ($: any, modes: string[] = []) =>
   $.ui.mount({ plugin: 'tldr', surface: 'terminal', component: 'SessionMode', props: { modes } } as any)
 
-test('one footer toggle flips the view and persists it; cards have no button', async ($, on) => {
+test('the footer shows both views, the active one shaded, and a press on the other switches', async ($, on) => {
   const writes: Record<string, unknown> = {}
   setup($, on, null, writes)
   modelReturns(on, { isAnswered: true, text: REPLY })
-  expect(JSON.stringify(await (await footer($)).drawn())).not.toContain('TL;DR only')
+  expect(JSON.stringify(await (await footer($)).drawn())).not.toContain('"label":"TL;DR"')
   await $.turn.complete(done())
-  expect(JSON.stringify(await (await band($)).drawn())).not.toContain('TL;DR only')
+  expect(JSON.stringify(await (await band($)).drawn())).not.toContain('"label":"TL;DR"')
   let ui = await footer($, ['focus'])
   const drawn = JSON.stringify(await ui.drawn())
-  expect(drawn).toContain('TL;DR only')
   expect(drawn).toContain('focus')
-  await ui.press({ key: 'view' })
+  expect(drawn).toContain('"label":"TL;DR"')
+  expect(drawn).not.toContain('"label":"full"')
+  await ui.press({ key: 'view-tldr' })
   expect(writes.view).toBe('tldr')
   ui = await footer($)
-  expect(JSON.stringify(await ui.drawn())).toContain('show full answers')
-  await ui.press({ key: 'view' })
+  expect(JSON.stringify(await ui.drawn())).toContain('"label":"full"')
+  await ui.press({ key: 'view-full' })
   expect(writes.view).toBe('full')
 })
 
@@ -341,12 +341,13 @@ const startTurn = async ($: any, on: any, model: unknown = { isAnswered: true, t
 
 const todos = (...s: string[]) => s.map((status, i) => ({ content: `Step ${i + 1} task`, status, activeForm: 'Doing' }))
 
-test('tldr mode: TodoWrite shows step 3 of 4 and 50%', async ($, on) => {
+test('tldr mode: TodoWrite shows step 3 of 4 with no bar on the step line', async ($, on) => {
   await startTurn($, on)
   await $.tool.call({ tool: 'TodoWrite', todos: todos('completed', 'completed', 'in_progress', 'pending') } as any)
   const drawn = await text(await wband($))
   expect(drawn).toContain('Step 3 of 4')
-  expect(drawn).toContain('50%')
+  expect(drawn).not.toContain('50%')
+  expect(drawn).not.toContain('━')
   expect(['Build','the','weather','dashboard'].every(w => drawn.includes(`"${w}"`))).toBe(true)
   expect(drawn).not.toContain('with charts')
   expect(drawn).toContain('Working')
@@ -361,7 +362,7 @@ test('TaskCreate and TaskUpdate progress is counted', async ($, on) => {
   await $.tool.call({ tool: 'TaskUpdate', taskId: '2', status: 'in_progress' } as any)
   const drawn = await text(await wband($))
   expect(drawn).toContain('Step 2 of 4')
-  expect(drawn).toContain('25%')
+  expect(drawn).not.toContain('25%')
   await $.tool.call({ tool: 'TaskUpdate', taskId: '4', status: 'deleted' } as any)
   expect(await text(await wband($))).toContain('Step 2 of 3')
 })
@@ -372,13 +373,34 @@ test('more than 6 steps shows +N more', async ($, on) => {
   expect(await text(await wband($))).toContain('+3 more')
 })
 
-test('no task list falls back to the latest activity', async ($, on) => {
+test('no task list: each tool call is a step, marked done when it returns', async ($, on) => {
   await startTurn($, on)
   await $.tool.call({ tool: 'Read', file_path: 'src/Foo.java' } as any)
   await $.tool.call({ tool: 'Bash', command: 'mvn test\necho done' } as any)
   const drawn = await text(await wband($))
-  expect(drawn).toContain('2 steps · Running: mvn test')
+  expect(drawn).toContain('Reading Foo.java')
+  expect(drawn).toContain('Running mvn test')
+  expect(drawn).not.toContain('Understanding your request')
+  expect(drawn.match(/"Done"/g)?.length).toBe(2)
   expect(drawn).not.toContain('Step 1 of')
+  expect(drawn).not.toContain('2 steps ·')
+})
+
+test('a shell step reads its description, not the command', async ($, on) => {
+  await startTurn($, on)
+  await $.tool.call({ tool: 'Bash', command: 'find . -name "*.ts" | xargs grep -l foo', description: 'Find files that use foo' } as any)
+  const drawn = await text(await wband($))
+  expect(drawn).toContain('Find files that use foo')
+  expect(drawn).not.toContain('xargs')
+})
+
+test('no task list: only the latest calls are listed, the rest counted', async ($, on) => {
+  await startTurn($, on)
+  for (let i = 0; i < 8; i++) await $.tool.call({ tool: 'Read', file_path: `f${i}.txt` } as any)
+  const drawn = await text(await wband($))
+  expect(drawn).toContain('+2 earlier')
+  expect(drawn).not.toContain('f1.txt')
+  expect(drawn).toContain('f7.txt')
 })
 
 test('subagent tool calls do not count', async ($, on) => {
@@ -386,7 +408,9 @@ test('subagent tool calls do not count', async ($, on) => {
   await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'sub1' } as any)
   await $.tool.call({ tool: 'TodoWrite', todos: todos('pending'), agentId: 'sub1' } as any)
   const drawn = await text(await wband($))
-  expect(drawn).toContain('0 steps')
+  expect(drawn).toContain('Understanding your request')
+  expect(drawn).toContain('"Step 1"')
+  expect(drawn).not.toContain('Running ls')
   expect(drawn).not.toContain('Step 1 of')
 })
 
@@ -482,3 +506,20 @@ test('full mode keeps today\'s band while working', async ($, on) => {
   expect(after).not.toContain(CARD)
 })
 
+
+test('tldr view asks for a short task list up front; full view adds nothing', async ($, on) => {
+  setup($, on, null)
+  on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'base', scope: 'shared' }] }) as any)
+  const plan = async (tools: string[]) =>
+    (await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools, outputStyle: null, traits: [] } as any)).sections.find((s: any) => s.id === 'tldr:plan')
+  expect(await plan(['TodoWrite', 'Bash'])).toBeUndefined()
+  await $.command.run({ command: 'tldr', args: 'only' } as any)
+  const added = await plan(['TodoWrite', 'Bash'])
+  expect(added?.scope).toBe('session')
+  expect(added?.text).toContain('first tool call is TodoWrite')
+  expect(added?.text).toContain('3 to 7 steps')
+  expect((await plan(['TaskCreate', 'TaskUpdate']))?.text).toContain('first tool call is TaskCreate')
+  expect(await plan(['Bash'])).toBeUndefined()
+  await $.command.run({ command: 'tldr', args: 'full' } as any)
+  expect(await plan(['TodoWrite'])).toBeUndefined()
+})

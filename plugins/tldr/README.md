@@ -27,7 +27,7 @@ The on/off and view choices are stored and survive restarts.
 
 ## View toggle
 
-One button at the right end of the prompt footer, beside the mode labels, flips between two views for the whole transcript: `TL;DR only` or `show full answers`. It appears once an answer has been summarized. `/tldr only` and `/tldr full` do the same.
+A switch at the right end of the prompt footer, beside the mode labels, reads `TL;DR · full`: the current view is drawn in the title gradient, the other dim; click the dim one to switch the whole transcript. It appears once an answer has been summarized. `/tldr only` and `/tldr full` do the same.
 
 | View | Transcript |
 |---|---|
@@ -43,14 +43,14 @@ In the `tldr` view the band above the prompt is a live progress card while Claud
 ```
 ╭──────────────────────────────────────────────────────────────────────────╮
 │ ⠹ Build the weather dashboard                                        23s │
-│ Step 2 of 4 ██████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  50% │
-│ ✓ Pick the page style and layout        ██████ Done                      │
-│ ● Build the weather dashboard           ▓▓▒▒░░ Working                   │
-│ ○ Publish it and share the link                Next                      │
+│ Step 2 of 3                                                              │
+│ ✓ Pick the page style and layout          Done                           │
+│ ● Build the weather dashboard    ░▒▓█     Working                        │
+│ ○ Publish it and share the link           Next                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
 ```
 
-Progress comes from Claude's own task list: `TodoWrite` (whole list), or `TaskCreate` plus `TaskUpdate` (matched by id). The bar is completed over total. Up to 6 steps show, then `+N more`. With no task list the bar is an indeterminate sweep, followed by one dim row with the tool-call count and latest activity (`Running: mvn test`, `Reading: src/Foo.java`). Subagent tool calls are ignored.
+In TL;DR view the plugin adds a short instruction to the system prompt: for anything that takes more than one tool call, Claude first writes a plan of 3 to 7 plainly named steps and ticks them off as it goes, so the band reads `Step 2 of 5` from the start. Full view adds nothing. Steps come from Claude's own task list: `TodoWrite` (whole list), or `TaskCreate` plus `TaskUpdate` (matched by id). The step in progress carries a short moving trail; finished steps get `✓ Done`. Up to 6 steps show, then `+N more`. With no task list, `Understanding your request` shows until the first tool call; then each tool call is a step, named by what it is for: a shell command by the description Claude gives it (`Find percentage assertions in tests`), other tools in plain words (`Reading Foo.java`, `Searching for "steps"`). Each is `Working` until it returns and `Done` after; the latest 6 show, with `+N earlier` above. Subagent tool calls are ignored.
 
 When the turn ends, the finished-turn information moves into the TL;DR card under the answer: in the `tldr` view its header carries a green `✓ All done · took 1m 47s` line with the step count. The spinner and timer tick about every 250 ms only while a turn runs.
 

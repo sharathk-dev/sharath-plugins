@@ -92,6 +92,12 @@ test('/standup shows commits, PRs and Jira since Friday on a Monday, in two Grap
   expect(await ui.find({ type: 'Text', text: 'Jira (1)' })).toBeDefined()
   expect((await ui.find({ type: 'Text', text: 'In Review' }))?.props?.color).toBe('magenta')
   expect(await ui.find({ type: 'Text', text: /Jira unavailable/ })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /✓ merged/ }))?.props?.color).toBe('green')
+  expect((await ui.find({ type: 'Text', text: /↑ opened/ }))?.props?.color).toBe('magenta')
+  expect((await ui.find({ type: 'Text', text: /◎ reviewed/ }))?.props?.color).toBe('blue')
+  const drawn = JSON.stringify(await ui.drawn())
+  expect(drawn).toContain('"borderColor":"magenta"')
+  expect(drawn).not.toContain('"borderDimColor"')
 })
 
 test('/standup links: PR numbers and Jira keys open in the browser', async ($, on) => {

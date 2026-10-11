@@ -56,6 +56,8 @@ declare module 'claude-code' {
       steps: Step[]
       /** Main-loop tool calls this turn, bookkeeping task tools excluded. */
       stepCount: number
+      /** Main-loop tool calls this turn as steps, shown when there is no task list. */
+      calls: Step[]
       /** Label of the latest main-loop tool call, e.g. "Running: mvn test". */
       activity: string
       /** Animation frame and elapsed time, updated by the clock timer only while working. */

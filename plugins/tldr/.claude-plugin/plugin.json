@@ -1,6 +1,6 @@
 {
   "name": "tldr",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "TL;DR card under long answers in the transcript",
   "types": "./types/index.d.ts",
   "author": {

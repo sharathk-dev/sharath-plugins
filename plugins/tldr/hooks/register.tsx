@@ -11,6 +11,7 @@ const phase = atom({ plugin: 'tldr', key: 'phase' } as const, 'idle')
 const prompt = atom({ plugin: 'tldr', key: 'prompt' } as const, '')
 const steps = atom({ plugin: 'tldr', key: 'steps' } as const, [])
 const stepCount = atom({ plugin: 'tldr', key: 'stepCount' } as const, 0)
+const calls = atom({ plugin: 'tldr', key: 'calls' } as const, [])
 const activity = atom({ plugin: 'tldr', key: 'activity' } as const, '')
 const pulse = atom({ plugin: 'tldr', key: 'pulse' } as const, { tick: 0, elapsedMs: 0 })
 
@@ -23,14 +24,12 @@ const LIMITS = { done: 1, needs: 3, notes: 2 }
 const TICK_MS = 250
 const SPINNER = [...'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏']
 const MAX_ROWS = 6
-const MINI_W = 6
+const MINI_W = 8
 const STATUS_W = 8
-const SWEEP_W = 6
-const PCT_W = 4
 const PINK = '#ff5fa2'
 const TRACK = '#3a3a3a'
 const GREY = '#6b7280'
-const SHIMMER = ['#ff5fa2', '#f04fb8', '#d946ef', '#b44ee0', '#9333ea', '#b44ee0', '#d946ef', '#f04fb8']
+const TRAIL = ['#4a2040', '#7a2a60', '#b03a8a', '#d946ef', '#f0abfc']
 const GRADIENT = [
   [255, 95, 162],
   [217, 70, 239],
@@ -62,20 +61,22 @@ function gradientColor(i: number, n: number): string {
 
 function describeCall(e: any): string {
   const one = (v: unknown) => firstLine(String(v ?? ''))
+  const file = (v: unknown) => one(v).split('/').pop() || one(v)
   switch (e.tool) {
-    case 'Bash': return `Running: ${one(e.command)}`
-    case 'Read': return `Reading: ${one(e.file_path)}`
+    case 'Bash': return one(e.description) || `Running ${one(e.command)}`
+    case 'Read': return `Reading ${file(e.file_path)}`
     case 'Edit':
     case 'MultiEdit':
-    case 'NotebookEdit': return `Editing: ${one(e.file_path ?? e.notebook_path)}`
-    case 'Write': return `Writing: ${one(e.file_path)}`
-    case 'Grep': return `Searching: ${one(e.pattern)}`
-    case 'Glob': return `Finding: ${one(e.pattern)}`
-    case 'WebFetch': return `Fetching: ${one(e.url)}`
-    case 'WebSearch': return `Searching the web: ${one(e.query)}`
+    case 'NotebookEdit': return `Editing ${file(e.file_path ?? e.notebook_path)}`
+    case 'Write': return `Writing ${file(e.file_path)}`
+    case 'Grep': return `Searching for "${one(e.pattern)}"`
+    case 'Glob': return `Finding files matching ${one(e.pattern)}`
+    case 'WebFetch': return `Fetching ${one(e.url)}`
+    case 'WebSearch': return `Searching the web for "${one(e.query)}"`
     case 'Agent':
-    case 'Task': return `Delegating: ${one(e.description)}`
-    default: return `Using ${e.tool}`
+    case 'Task': return one(e.description) || 'Delegating to a subagent'
+    case 'Skill': return `Loading the ${one(e.skill)} skill`
+    default: return e.tool.startsWith('mcp__') ? `Calling ${e.tool.split('__').pop()}` : `Using ${e.tool}`
   }
 }
 
@@ -176,6 +177,16 @@ async function summarize($: any, answer: string, progress: Progress | null = nul
   return result
 }
 
+function planInstruction(tool: string): string {
+  return [
+    `# Plan before you work`,
+    `The person is following your progress in a step list above the prompt, which only shows steps you write down.`,
+    `For any request that takes more than one tool call, your first tool call is ${tool}: a plan of 3 to 7 steps, each a few plain words saying what it does ("Reading the parser", "Running the tests").`,
+    `Mark each step in progress when you start it and completed as soon as it is done, and add a step if the work turns out bigger than planned.`,
+    `Skip the plan for a question you can answer straight away.`,
+  ].join('\n')
+}
+
 async function setView($: any, mode: 'full' | 'tldr'): Promise<void> {
   await $.store.set('view', mode)
   await update($, view, () => mode)
@@ -185,6 +196,7 @@ async function resetProgress($: any): Promise<void> {
   await update($, phase, () => 'idle')
   await update($, steps, () => [])
   await update($, stepCount, () => 0)
+  await update($, calls, () => [])
   await update($, activity, () => '')
   await update($, pulse, () => ({ tick: 0, elapsedMs: 0 }))
 }
@@ -195,6 +207,17 @@ async function clear($: any): Promise<void> {
 }
 
 const count = (s: Summary) => (s.done ? 1 : 0) + (s.verified ? 1 : 0) + s.needs.length + s.notes.length
+
+function segment($: any, Button: any, Text: any, label: string, target: 'full' | 'tldr', mode: 'full' | 'tldr') {
+  if (mode === target) {
+    return (
+      <Text key={`view-${target}`}>
+        {[...label].map((ch, i) => <Text key={i} bold color={gradientColor(i, label.length)}>{ch}</Text>)}
+      </Text>
+    )
+  }
+  return <Button key={`view-${target}`} plain dimColor label={label} onPress={() => setView($, target)} />
+}
 
 function card($: any, e: any, entry: Entry, mode: 'full' | 'tldr') {
   const { Box, Text } = $.ui.resolve(e)
@@ -243,6 +266,7 @@ function card($: any, e: any, entry: Entry, mode: 'full' | 'tldr') {
 }
 
 export const register: Register = on => {
+  let callSeq = 0
   let timer: { cancel: () => void } | undefined
   const stopTimer = () => {
     timer?.cancel()
@@ -294,6 +318,14 @@ export const register: Register = on => {
     return entry ? card($, e, entry, 'full') : next(e)
   })
 
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    if ((await read($, view)) !== 'tldr') return composed
+    const tool = e.tools.find(t => t === 'TodoWrite' || t === 'TaskCreate')
+    if (tool === undefined) return composed
+    return { sections: [...composed.sections, { id: 'tldr:plan', scope: 'session' as const, text: planInstruction(tool) }] }
+  })
+
   on('session.end', async ($, e, next) => {
     stopTimer()
     return next(e)
@@ -322,10 +354,18 @@ export const register: Register = on => {
   })
 
   on('tool.call', async ($, e, next) => {
-    if (e.agentId === undefined && !TASK_TOOLS.has(e.tool)) {
-      await Promise.all([update($, stepCount, n => n + 1), update($, activity, () => describeCall(e))]).catch(() => {})
+    if (e.agentId !== undefined || TASK_TOOLS.has(e.tool)) return next(e)
+    const id = String(callSeq++)
+    await Promise.all([
+      update($, stepCount, n => n + 1),
+      update($, activity, () => describeCall(e)),
+      update($, calls, list => [...list, { id, text: describeCall(e), status: 'in_progress' as const }]),
+    ]).catch(() => {})
+    try {
+      return await next(e)
+    } finally {
+      await update($, calls, list => list.map(s => (s.id === id ? { ...s, status: 'completed' as const } : s))).catch(() => {})
     }
-    return next(e)
   })
 
   on('tool.call', { tool: 'TodoWrite' }, async ($, e, next) => {
@@ -425,11 +465,11 @@ export const register: Register = on => {
     return (
       <Box flexDirection="row" gap={1}>
         {e.props.modes.length > 0 ? <Text dimColor>{e.props.modes.join(' & ')}</Text> : null}
-        <Button
-          key="view"
-          label={mode === 'tldr' ? 'show full answers' : 'TL;DR only'}
-          onPress={() => setView($, mode === 'tldr' ? 'full' : 'tldr')}
-        />
+        <Box flexDirection="row">
+          {segment($, Button, Text, 'TL;DR', 'tldr', mode)}
+          <Text dimColor>{' · '}</Text>
+          {segment($, Button, Text, 'full', 'full', mode)}
+        </Box>
       </Box>
     )
   })
@@ -444,7 +484,8 @@ export const register: Register = on => {
     const { Box, Text } = $.ui.resolve(e)
 
     const list = await read($, steps)
-    const calls = await read($, stepCount)
+    const callList = await read($, calls)
+    const callCount = await read($, stepCount)
     const text = firstLine(await read($, prompt))
     const inner = Math.max(20, width - 4)
     const { tick, elapsedMs } = await read($, pulse)
@@ -467,58 +508,34 @@ export const register: Register = on => {
       </Box>
     )
 
-    const cells = (n: number, bg: string) => (n > 0 ? <Text backgroundColor={bg}>{' '.repeat(n)}</Text> : null)
     const total = list.length
     const completed = list.filter(s => s.status === 'completed').length
-    const pct = total === 0 ? 0 : Math.round((completed / total) * 100)
     const cur = currentIndex(list)
-    const label = `Step ${Math.min(completed + 1, total)} of ${total}`
-    const pctText = `${pct}%`.padStart(PCT_W)
-    let progress: unknown
-    let activityRow: unknown = null
-    if (total > 0) {
-      const w = Math.max(4, inner - label.length - PCT_W - 2)
-      const filled = Math.round((w * pct) / 100)
-      progress = (
-        <Text>
-          <Text dimColor>{`${label} `}</Text>
-          {cells(filled, PINK)}
-          {cells(w - filled, TRACK)}
-          <Text bold color={PINK}>{` ${pctText}`}</Text>
-        </Text>
-      )
-    } else {
-      const w = Math.max(4, inner - 'Working'.length - PCT_W - 2)
-      const start = ((tick * 2) % (w + SWEEP_W)) - SWEEP_W
-      const from = Math.max(0, start)
-      const to = Math.min(w, start + SWEEP_W)
-      progress = (
-        <Text>
-          <Text dimColor>{'Working '}</Text>
-          {cells(from, TRACK)}
-          {cells(to - from, PINK)}
-          {cells(w - to, TRACK)}
-        </Text>
-      )
-      const line = `${calls} steps${(await read($, activity)) ? ` · ${await read($, activity)}` : ''}`
-      activityRow = <Text dimColor>{clip(line, inner)}</Text>
-    }
-
-    const hidden = Math.max(0, total - MAX_ROWS)
-    const first = Math.max(0, Math.min(cur - 2, hidden))
-    const textW = Math.max(4, inner - 2 - MINI_W - STATUS_W - 2)
-    const rows = list.slice(first, first + MAX_ROWS).map((s, i) => {
+    const doneCalls = callList.filter(c => c.status === 'completed').length
+    const label =
+      total > 0
+        ? `Step ${Math.min(completed + 1, total)} of ${total}`
+        : `Step ${Math.max(1, Math.min(doneCalls + 1, callList.length))}`
+    const progress = <Text dimColor>{label}</Text>
+    const byCalls = total === 0
+    const opening: Step = { id: 'opening', text: 'Understanding your request', status: 'in_progress' }
+    const shown = byCalls ? (callList.length > 0 ? callList : [opening]) : list
+    const hidden = Math.max(0, shown.length - MAX_ROWS)
+    const first = byCalls ? hidden : Math.max(0, Math.min(cur - 2, hidden))
+    const longest = Math.max(0, ...shown.slice(first, first + MAX_ROWS).map(s => s.text.length))
+    const textW = Math.max(4, Math.min(longest, Math.floor(inner * 0.45), inner - 2 - MINI_W - STATUS_W - 2))
+    const trail = (head: number) =>
+      [...Array(MINI_W).keys()].map(c => {
+        const back = head - c
+        const color = back >= 0 && back < TRAIL.length ? TRAIL[TRAIL.length - 1 - back] : TRACK
+        return <Text key={`m${c}`} backgroundColor={color}>{' '}</Text>
+      })
+    const rows = shown.slice(first, first + MAX_ROWS).map((s, i) => {
       const idx = first + i
       const isDoneRow = s.status === 'completed'
-      const isCurrent = idx === cur
+      const isCurrent = byCalls ? !isDoneRow : idx === cur
       const status = isDoneRow ? 'Done' : isCurrent ? 'Working' : idx === cur + 1 ? 'Next' : 'Up next'
-      const mini = isDoneRow
-        ? cells(MINI_W, 'green')
-        : isCurrent
-          ? [...Array(MINI_W).keys()].map(c => (
-              <Text key={`m${c}`} backgroundColor={SHIMMER[(c + tick) % SHIMMER.length]}>{' '}</Text>
-            ))
-          : ' '.repeat(MINI_W)
+      const mini = isCurrent ? trail(tick % (MINI_W + TRAIL.length)) : ' '.repeat(MINI_W)
       return (
         <Text key={`step-${idx}`}>
           {isDoneRow ? <Text color="green">{'✓ '}</Text> : isCurrent ? <Text bold>{'● '}</Text> : <Text dimColor>{'○ '}</Text>}
@@ -538,15 +555,15 @@ export const register: Register = on => {
         </Text>
       )
     })
-    const more = total - rows.length
+    const more = byCalls ? 0 : total - rows.length
 
     return (
       <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1} width="100%">
         {header}
         {progress}
+        {byCalls && first > 0 ? <Text dimColor>{`+${first} earlier`}</Text> : null}
         {rows}
         {more > 0 ? <Text dimColor>{`+${more} more`}</Text> : null}
-        {activityRow}
       </Box>
     )
   })

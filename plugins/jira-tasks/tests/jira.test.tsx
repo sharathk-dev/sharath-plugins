@@ -63,6 +63,10 @@ test('detects Atlassian MCP by its tools, lists tasks grouped by status, and dra
   expect(await ui.find({ type: 'Text', text: /^ \+2$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Fix login page/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^ ● Task $/ })).toBeDefined()
+  const drawn = JSON.stringify(await ui.drawn())
+  expect(drawn).toContain('"borderColor":"magenta"')
+  expect(drawn).not.toContain('"borderDimColor"')
+  expect(drawn).toContain('"color":"#ff5fa2"},"children":["J"]')
 })
 
 test('colours and orders custom board statuses by their Jira category', async ($, on) => {
