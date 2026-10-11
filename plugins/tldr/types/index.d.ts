@@ -1,12 +1,16 @@
+/** off: the plugin stays out of the way; full: answer plus card; tldr: card only, answer folded. */
+export type Mode = 'off' | 'full' | 'tldr'
+
+export type Layout = 'answer' | 'table' | 'steps' | 'work'
+
 export type Summary = {
-  /** One-line outcome. */
-  done: string
-  /** What was tested or run and its outcome; empty when nothing was verifiable. */
-  verified: string
-  /** Questions, decisions or actions the user must take (0-3). */
+  layout: Layout
+  /** Output lines in order, except table rows and "● " lines. */
+  body: string[]
+  /** Markdown table cells, header row first; null when there is no table. */
+  table: string[][] | null
+  /** "● " lines: questions or actions for the user. */
   needs: string[]
-  /** Other key facts (0-2). */
-  notes: string[]
   /** Non-empty line count of the original answer. */
   lines: number
 }
@@ -14,8 +18,8 @@ export type Summary = {
 export type Progress = {
   /** Duration of the turn that produced the answer. */
   tookMs: number
-  /** Task-list length, or the main-loop tool-call count when there was no task list. */
-  steps: number
+  /** Names of the steps taken this turn: the task list, or the main-loop tool calls when there was none. Consecutive repeats are collapsed to `name ×N`. */
+  steps: string[]
 }
 
 export type Entry = {
@@ -24,7 +28,7 @@ export type Entry = {
   /** Non-empty line count of that answer. */
   lines: number
   summary: Summary
-  /** Turn stats for the "All done" line of the inline card; null when unknown. */
+  /** Turn stats for the time and steps of the inline card; null when unknown. */
   progress: Progress | null
 }
 
@@ -44,6 +48,8 @@ declare module 'claude-code' {
       pending: string
       /** Text of the last long main-loop answer, for /tldr. */
       lastAnswer: string
+      /** The prompt that produced lastAnswer, for /tldr. */
+      lastRequest: string
       /** Bumped by every new turn, prompt or summary run; stale results are dropped. */
       epoch: number
       /** 'tldr' folds summarized answers in the transcript, leaving the TL;DR card; 'full' draws them as is. Persisted in the store. */

@@ -1,10 +1,23 @@
 {
   "name": "tldr",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "TL;DR card under long answers in the transcript",
   "types": "./types/index.d.ts",
   "author": {
     "name": "sharath",
     "url": "https://github.com/sharathk-dev"
+  },
+  "userConfig": {
+    "defaultView": {
+      "type": "string",
+      "title": "Default mode",
+      "description": "TL;DR mode at session start: off, full answer + card, or TL;DR only",
+      "default": "full",
+      "options": [
+        "off",
+        "full",
+        "tldr"
+      ]
+    }
   }
 }
