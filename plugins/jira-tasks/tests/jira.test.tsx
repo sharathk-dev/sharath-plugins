@@ -261,5 +261,46 @@ test('says so when the Jira reply is cut off', async ($, on) => {
   on('tool.list', async () => tools('mcp__a__searchJiraIssuesUsingJql'))
   on('mcp.call', async () => ({ value: { content: [{ type: 'text' as const, text: '{"data":{"issues":[{"key":"KAN-1","fi' }], isError: false } }))
   const { text: out } = await $.command.run(RUN)
-  expect(out).toBe("Couldn't load Jira tasks: the Jira reply was cut off or not JSON (37 chars)")
+  expect(out).toBe('Couldn\'t load Jira tasks: the Jira reply was cut off or not JSON (37 chars): {"data":{"issues":[{"key":"KAN-1","fi')
+})
+
+test('skips a notice block ahead of the JSON', async ($, on) => {
+  on('tool.list', async () => tools('mcp__a__searchJiraIssuesUsingJql'))
+  on('mcp.call', async (_$, e) => {
+    const json = e.tool === 'getAccessibleAtlassianResources'
+      ? { data: { resources: [{ cloudId: 'c1', url: 'https://x.atlassian.net' }] } }
+      : { data: { isLast: true, issues: ISSUES } }
+    return { value: { content: [{ type: 'text' as const, text: 'Note: custom fields were omitted.' }, { type: 'text' as const, text: JSON.stringify(json) }], isError: false } }
+  })
+  const { text: out } = await $.command.run(RUN)
+  expect(out).toStartWith('Jira · 3 open')
+})
+
+test('reads a reply saved to a file, with issues under nodes', async ($, on) => {
+  on('tool.list', async () => tools('mcp__a__searchJiraIssuesUsingJql'))
+  const read: string[] = []
+  on('fs.read', async (_$: any, e: any) => {
+    read.push(e.path)
+    return { value: JSON.stringify({ data: { isLast: true, issues: { nodes: ISSUES } } }) } as any
+  })
+  on('mcp.call', async (_$, e) => {
+    if (e.tool === 'getAccessibleAtlassianResources')
+      return text({ data: { resources: [{ cloudId: 'c1', url: 'https://x.atlassian.net' }] } })
+    return { value: { content: [{ type: 'text' as const, text: 'Large output has been saved to /tmp/mcp/out-1.json. Read it to see the result.' }], isError: false } }
+  })
+  const { text: out } = await $.command.run(RUN)
+  expect(read).toEqual(['/tmp/mcp/out-1.json'])
+  expect(out).toStartWith('Jira · 3 open')
+})
+
+test('unwraps a saved reply kept as content blocks', async ($, on) => {
+  on('tool.list', async () => tools('mcp__a__searchJiraIssuesUsingJql'))
+  on('fs.read', async () => ({ value: JSON.stringify([{ type: 'text', text: JSON.stringify({ data: { isLast: true, issues: ISSUES } }) }]) }) as any)
+  on('mcp.call', async (_$, e) => {
+    if (e.tool === 'getAccessibleAtlassianResources')
+      return text({ data: { resources: [{ cloudId: 'c1', url: 'https://x.atlassian.net' }] } })
+    return { value: { content: [{ type: 'text' as const, text: 'Output has been saved to `/tmp/mcp/out-2.txt`' }], isError: false } }
+  })
+  const { text: out } = await $.command.run(RUN)
+  expect(out).toStartWith('Jira · 3 open')
 })

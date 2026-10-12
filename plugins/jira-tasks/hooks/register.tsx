@@ -111,16 +111,34 @@ async function detect($: EngineInterface): Promise<Source> {
   throw new Error('no Jira MCP server connected (no Jira search tool found). Check /mcp')
 }
 
-// MCP servers answer with a text block holding JSON.
-function parse(result: { content: { type: string; text?: string }[]; isError: boolean }): any {
-  const text = result.content.find(block => block.type === 'text')?.text ?? ''
-  if (result.isError) throw new Error(text || 'the Jira server reported an error')
-  try {
-    return JSON.parse(text)
-  } catch {
-    throw new Error(`the Jira reply was cut off or not JSON (${text.length} chars)`)
+// MCP servers answer with a text block holding JSON, or, when it's large, a note naming the file it was saved to.
+const SAVED_TO = /saved to:?\s+[`'"]?([^\s`'"]+?)[`'"]?\.?(?:\s|$)/i
+
+async function parse($: EngineInterface, result: { content: { type: string; text?: string }[]; isError: boolean }): Promise<any> {
+  const texts = result.content.filter(block => block.type === 'text').map(block => block.text ?? '')
+  if (result.isError) throw new Error(texts.join('\n') || 'the Jira server reported an error')
+  for (const text of texts) {
+    try {
+      return JSON.parse(text)
+    } catch {}
   }
+  const text = texts.join('\n')
+  const saved = text.match(SAVED_TO)?.[1]
+  if (saved) {
+    const file = await $.fs.read(saved)
+    try {
+      const json = JSON.parse(file)
+      const inner = Array.isArray(json) ? json.find(block => block?.type === 'text')?.text : undefined
+      return typeof inner === 'string' ? JSON.parse(inner) : json
+    } catch {
+      throw new Error(`the Jira reply saved to ${saved} is not JSON (${file.length} chars)`)
+    }
+  }
+  const start = text.replace(/\s+/g, ' ').trim().slice(0, 160)
+  throw new Error(`the Jira reply was cut off or not JSON (${text.length} chars): ${start}`)
 }
+
+const listOf = (v: any): any[] => (Array.isArray(v) ? v : Array.isArray(v?.nodes) ? v.nodes : [])
 
 function group(tasks: Task[]): [string, Task[]][] {
   const groups = new Map<string, Task[]>()
@@ -168,7 +186,7 @@ async function searchJira($: EngineInterface, jql: string, fields: string[], lim
   let cloudId = await read($, cloud)
   let site = await read($, siteUrl)
   if (adapter.needsCloudId && (!cloudId || !site)) {
-    const found = parse(await $.mcp.call(server, 'getAccessibleAtlassianResources', {}))
+    const found = await parse($, await $.mcp.call(server, 'getAccessibleAtlassianResources', {}))
     const first = found?.data?.resources?.[0] ?? found?.[0]
     cloudId = first?.cloudId ?? first?.id ?? ''
     site = site || (first?.url ?? '').replace(/\/$/, '')
@@ -181,8 +199,8 @@ async function searchJira($: EngineInterface, jql: string, fields: string[], lim
   let cutOff = false
   do {
     const size = adapter.paged ? Math.min(PAGE_SIZE, limit - issues.length) : limit
-    const res = parse(await $.mcp.call(server, adapter.tool, adapter.args(jql, cloudId, fields, size, pageToken)))
-    issues.push(...(res?.data?.issues ?? res?.issues ?? (Array.isArray(res) ? res : [])))
+    const res = await parse($, await $.mcp.call(server, adapter.tool, adapter.args(jql, cloudId, fields, size, pageToken)))
+    issues.push(...listOf(res?.data?.issues ?? res?.issues ?? res))
     const last = res?.data?.isLast ?? true
     cutOff = adapter.paged ? res?.data?.isLast === false : issues.length >= limit
     pageToken = adapter.paged && !last && issues.length < limit ? res?.data?.nextPageToken : undefined
