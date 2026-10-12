@@ -157,10 +157,11 @@ async function openInBrowser($: EngineInterface, url: string) {
 
 // One GraphQL call: your open PRs and the ones waiting on your review, each with its review decision and the
 // last commit's combined CI state. Your own PRs also carry their review threads, to count what is still open.
-const PR_QUERY = `query {
+// With `owners` set, other owners' PRs are dropped after the search, so it asks for more.
+const prQuery = (limit: number) => `query {
   viewer { login }
-  mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: 50) { nodes { ...pr ...threads } }
-  review: search(query: "is:pr is:open review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: 50) { nodes { ...pr } }
+  mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: ${limit}) { nodes { ...pr ...threads } }
+  review: search(query: "is:pr is:open review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: ${limit}) { nodes { ...pr } }
 }
 fragment pr on PullRequest {
   number title url isDraft reviewDecision headRefName baseRefName mergeable
@@ -169,7 +170,9 @@ fragment pr on PullRequest {
   commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 50) { nodes { __typename ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
 }
 fragment threads on PullRequest {
-  reviewThreads(first: 100) { nodes { isResolved comments(last: 1) { nodes { author { login } } } } }
+  reviewThreads(first: 100) { nodes { isResolved
+    started: comments(first: 1) { nodes { author { __typename login } } }
+    comments(last: 1) { nodes { author { __typename login } } } } }
 }`
 
 type Review = 'Approved' | 'Changes' | 'Review' | 'Draft'
@@ -192,8 +195,11 @@ const FAILED_RUNS = ['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'ST
 
 const ISSUE_KEY = /\b[A-Z][A-Z0-9]+-\d+\b/
 
+// Bots (CI reviewers, linters, AI review apps) start threads too; only threads a person started count.
+const isBot = (author: any) => author?.__typename === 'Bot' || /\[bot\]$/.test(String(author?.login ?? ''))
+
 function threadsOf(n: any, me: string): Threads | undefined {
-  const list: any[] = n.reviewThreads?.nodes ?? []
+  const list: any[] = (n.reviewThreads?.nodes ?? []).filter((t: any) => !isBot(t?.started?.nodes?.[0]?.author))
   if (list.length === 0) return undefined
   const open = list.filter(t => !t.isResolved)
   const waiting = open.filter(t => {
@@ -279,13 +285,21 @@ function stackPrs(nodes: any[], rows: PrRow[]): PrRow[] {
   return out
 }
 
-async function fetchPrBoard($: EngineInterface): Promise<PrBoard> {
-  const { exitCode, stdout, stderr } = await $.process.run(['gh', 'api', 'graphql', '-f', `query=${PR_QUERY}`], {
+// GitHub owners (orgs or users) to keep, from the `owners` setting: comma or space separated. Empty keeps every repo.
+export function ownersOf(raw: unknown): string[] {
+  return String(raw ?? '').split(/[\s,]+/).map(s => s.trim().toLowerCase()).filter(Boolean)
+}
+const keepOwner = (owners: string[], owner: string) => owners.length === 0 || owners.includes(owner.toLowerCase())
+
+async function fetchPrBoard($: EngineInterface, owners: string[] = []): Promise<PrBoard> {
+  const query = prQuery(owners.length ? 100 : 50)
+  const { exitCode, stdout, stderr } = await $.process.run(['gh', 'api', 'graphql', '-f', `query=${query}`], {
     timeoutMs: 20000,
   })
   if (exitCode !== 0) throw new Error((stderr || stdout).trim().split('\n')[0] || `gh exited with ${exitCode}`)
   const data = JSON.parse(stdout)?.data
-  const nodes = (k: string) => (data?.[k]?.nodes ?? []).filter((n: any) => n && n.number)
+  const ownerOf = (n: any) => String(n.url ?? '').match(/github\.com\/([^/]+)\//)?.[1] ?? ''
+  const nodes = (k: string) => (data?.[k]?.nodes ?? []).filter((n: any) => n && n.number && keepOwner(owners, ownerOf(n)))
   const me = String(data?.viewer?.login ?? '')
   const mineNodes: any[] = nodes('mine')
   const mine = stackPrs(mineNodes, mineNodes.map(n => toPrRow(n, false, me)))
@@ -413,6 +427,37 @@ function prBoardFromMarkdown(text: string): { head: string; jiraDown: boolean; s
   return { head: head[1]!, jiraDown: Boolean(head[2]), sections }
 }
 
+const HEADERS = { pr: 'PR', repo: 'Repo', title: 'Title', jira: 'Jira', ci: 'CI', status: 'Status', needs: 'Needs' }
+// Past this the Needs text is cut; the hover note has it whole.
+const NEEDS_MAX = 30
+
+// Something only you can move: a reply owed, a conflict, failing CI, or an open PR on a closed ticket.
+const needsYou = (r: PrRow) => (r.threads?.waiting ?? 0) > 0 || Boolean(r.conflict) || r.ci === 'failing' || r.jira?.category === 'Done'
+
+// The card splits your PRs by what they need: Needs you, Waiting on others, then Drafts (your work in progress, even
+// with problems). A stack moves as one, by its root PR: a draft root makes it a draft, any member needing you, the
+// stack. Review requests come last. The text the model reads keeps its own two sections.
+function groupSections(sections: [string, PrRow[]][]): [string, PrRow[]][] {
+  const groups: [string, PrRow[]][] = [['Needs you', []], ['Waiting on others', []], ['Drafts', []]]
+  const out: [string, PrRow[]][] = []
+  for (const [name, list] of sections) {
+    if (name !== 'Mine') {
+      out.push([name === 'Waiting on you' ? 'Review requests' : name, list])
+      continue
+    }
+    const stacks: PrRow[][] = []
+    for (const r of list) {
+      if (r.depth && stacks.length > 0) stacks[stacks.length - 1]!.push(r)
+      else stacks.push([r])
+    }
+    for (const stack of stacks) {
+      const group = stack[0]!.review === 'Draft' ? 2 : stack.some(needsYou) ? 0 : 1
+      groups[group]![1].push(...stack)
+    }
+  }
+  return [...groups.filter(([, list]) => list.length > 0), ...out]
+}
+
 const REVIEW_COLOUR: Record<Review, string> = { Approved: 'green', Changes: 'red', Review: 'magenta', Draft: 'yellow' }
 const CI_MARK: Record<Ci, { mark: string; colour: string }> = {
   passing: { mark: '✓', colour: 'green' },
@@ -421,7 +466,8 @@ const CI_MARK: Record<Ci, { mark: string; colour: string }> = {
   '': { mark: ' ', colour: 'gray' },
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const owners = ownersOf(options?.owners)
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'pr',
@@ -432,7 +478,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'pr' }, async $ => {
     try {
-      const board = await fetchPrBoard($)
+      const board = await fetchPrBoard($, owners)
       const jiraDown = await addJiraStatuses($, board)
       return { text: prBoardToMarkdown(board, new Date(), jiraDown) }
     } catch (err) {
@@ -445,7 +491,9 @@ export const register: Register = on => {
     if (!board) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const site = await read($, siteUrl)
-    const rows = board.sections.flatMap(([, list]) => list)
+    const mineRows = new Set(board.sections.find(([name]) => name === 'Mine')?.[1] ?? [])
+    const sections = groupSections(board.sections)
+    const rows = sections.flatMap(([, list]) => list)
     const numWidth = Math.max(0, ...rows.map(r => `PR#${r.number}`.length))
     const repoWidth = Math.min(18, Math.max(0, ...rows.map(r => r.repo.length)))
     const keyWidth = Math.max(0, ...rows.map(r => r.key?.length ?? 0))
@@ -453,19 +501,26 @@ export const register: Register = on => {
     const jiraCut = (status: string) => (status.length <= 16 ? status : `${status.slice(0, 15).trimEnd()}…`)
     const statusWidth = Math.max(0, ...rows.map(r => (r.jira ? jiraCut(r.jira.status).length : 0)))
     const keyColumn = keyWidth + (statusWidth ? statusWidth + 1 : 0)
-    const reviewWidth = Math.max(0, ...rows.map(r => r.review.length))
-    const conflictMark = 'conflict'
-    const fraction = (t: Threads) => `${t.resolved}/${t.total}`
-    const waitingMark = (t: Threads) => (t.waiting ? ` ●${t.waiting}` : '')
+    const reviewWidth = Math.max(HEADERS.status.length, ...rows.map(r => r.review.length))
     // A failing row counts its failed checks next to the mark; their names show on hover.
-    const ciMark = (r: PrRow) => CI_MARK[r.ci].mark + (r.failing?.length ? r.failing.length : '')
-    // One signals column (threads, conflict, CI) as wide as the busiest row, left-aligned just before the review label;
-    // its parts are two spaces apart. No row with a signal, no column.
-    const signalLength = (r: PrRow) => {
-      const parts = [r.threads ? fraction(r.threads).length + waitingMark(r.threads).length : 0, r.conflict ? conflictMark.length : 0, r.ci ? ciMark(r).length : 0].filter(Boolean)
-      return parts.reduce((sum, n) => sum + n, 0) + 2 * Math.max(0, parts.length - 1)
+    const ciMark = (r: PrRow) => CI_MARK[r.ci].mark + (r.failing?.length ? ` ${r.failing.length}` : '')
+    // A column no row uses takes no room and has no header; a used one is at least as wide as its header.
+    const used = (n: number, header: string) => (n > 0 ? Math.max(n, header.length) : 0)
+    const ciWidth = used(Math.max(0, ...rows.map(r => (r.ci ? ciMark(r).length : 0))), HEADERS.ci)
+    // Needs: what is holding the PR, in words, for a glance. Red when it's on you, yellow when it waits on others.
+    const mismatchOf = (r: PrRow) => mineRows.has(r) && r.jira?.category === 'Done'
+    const needsText = (r: PrRow) => {
+      const t = r.threads
+      const open = t ? t.total - t.resolved : 0
+      return [
+        r.conflict ? 'conflict' : '',
+        t?.waiting ? `${t.waiting} unanswered` : '',
+        open > (t?.waiting ?? 0) ? `${open - (t?.waiting ?? 0)} open` : '',
+        mismatchOf(r) ? 'ticket closed' : '',
+      ].filter(Boolean).join(' · ')
     }
-    const signalsWidth = Math.max(0, ...rows.map(signalLength))
+    const needsOnYou = (r: PrRow) => Boolean(r.conflict) || (r.threads?.waiting ?? 0) > 0 || mismatchOf(r)
+    const needsWidth = used(Math.min(NEEDS_MAX, Math.max(0, ...rows.map(r => needsText(r).length))), HEADERS.needs)
     // A stacked PR whose base isn't listed ends with ` on feature/x`.
     // A stacked PR's tree glyph leads its title (`└─ `, `├─ ` when a sibling follows), three cells deeper per level.
     const treeOf = (list: PrRow[], i: number) => {
@@ -476,10 +531,10 @@ export const register: Register = on => {
       const last = !rest.slice(0, end < 0 ? rest.length : end).some(o => o.depth === r.depth)
       return `${'   '.repeat(r.depth - 1)}${last ? '└─' : '├─'} `
     }
-    const prefixes = new Map(board.sections.flatMap(([, list]) => list.map((r, i) => [r, treeOf(list, i)] as const)))
+    const prefixes = new Map(sections.flatMap(([, list]) => list.map((r, i) => [r, treeOf(list, i)] as const)))
     const suffix = (r: PrRow) => (r.author ? ` · ${r.author}` : r.onBranch ? ` on ${r.onBranch}` : '')
-    const columns = 4 + (keyColumn ? 1 : 0) + (signalsWidth ? 1 : 0)
-    const fixed = numWidth + repoWidth + keyColumn + signalsWidth + reviewWidth + (columns - 1)
+    const columns = 4 + (keyColumn ? 1 : 0) + (ciWidth ? 1 : 0) + (needsWidth ? 1 : 0)
+    const fixed = numWidth + repoWidth + keyColumn + ciWidth + reviewWidth + needsWidth + (columns - 1)
     // Hovering a row shows why it's blocked on the same line, just right of the card, in the space the card leaves.
     // An overlay inside the card doesn't blank what's beneath it, so the note stays outside. No space, no note.
     // Clicking the note opens the PR's conversation, where the failed checks and open threads are.
@@ -504,7 +559,34 @@ export const register: Register = on => {
           <Text dimColor>{board.head + (board.jiraDown ? ' · Jira unavailable' : '')}</Text>
         </Box>
         {rows.length === 0 && <Text dimColor>No open PRs, and nothing waiting on your review.</Text>}
-        {board.sections.map(([name, list]) => (
+        {rows.length > 0 && (
+          // Every column named, then a rule under them.
+          <Box flexDirection="row" gap={1} marginTop={1}>
+            <Box width={numWidth} flexShrink={0}><Text dimColor>{HEADERS.pr}</Text></Box>
+            <Box width={repoWidth} flexShrink={0}><Text dimColor>{HEADERS.repo}</Text></Box>
+            <Box flexGrow={1} flexShrink={1}><Text dimColor>{HEADERS.title}</Text></Box>
+            {keyColumn > 0 && (
+              <Box width={keyColumn} flexShrink={0}>
+                <Text dimColor>{HEADERS.jira}</Text>
+              </Box>
+            )}
+            {ciWidth > 0 && (
+              <Box width={ciWidth} flexShrink={0}>
+                <Text dimColor>{HEADERS.ci}</Text>
+              </Box>
+            )}
+            <Box width={reviewWidth} flexShrink={0}>
+              <Text dimColor>{HEADERS.status}</Text>
+            </Box>
+            {needsWidth > 0 && (
+              <Box width={needsWidth} flexShrink={0}>
+                <Text dimColor>{HEADERS.needs}</Text>
+              </Box>
+            )}
+          </Box>
+        )}
+        {rows.length > 0 && <Text dimColor>{'─'.repeat(Math.max(0, width - 4))}</Text>}
+        {sections.map(([name, list]) => (
           <Box key={`s-${name}`} flexDirection="column" marginTop={1}>
             <Text bold dimColor>
               {name}
@@ -513,7 +595,7 @@ export const register: Register = on => {
               const ci = CI_MARK[r.ci]
               const tree = prefixes.get(r) ?? ''
               // An open PR on a Done ticket is a mismatch worth noticing.
-              const mismatch = name === 'Mine' && r.jira?.category === 'Done'
+              const mismatch = mismatchOf(r)
               return (
                 <Box key={`pr-${r.repo}-${r.number}`} flexDirection="column">
                   <Box flexDirection="row" gap={1}>
@@ -560,25 +642,21 @@ export const register: Register = on => {
                         )}
                       </Box>
                     )}
-                    {signalsWidth > 0 && (
-                      <Box width={signalsWidth} flexShrink={0} flexDirection="row" gap={2}>
-                        {r.threads && (
-                          <Text>
-                            <Text color={r.threads.resolved < r.threads.total ? 'yellow' : 'gray'}>{fraction(r.threads)}</Text>
-                            {r.threads.waiting > 0 && <Text color="red">{waitingMark(r.threads)}</Text>}
-                          </Text>
-                        )}
-                        {r.conflict && (
-                          <Box flexShrink={0}>
-                            <Text color="red" bold wrap="truncate">{conflictMark}</Text>
-                          </Box>
-                        )}
+                    {ciWidth > 0 && (
+                      <Box width={ciWidth} flexShrink={0}>
                         {r.ci && <Text color={ci.colour}>{ciMark(r)}</Text>}
                       </Box>
                     )}
                     <Box width={reviewWidth} flexShrink={0}>
                       <Text color={REVIEW_COLOUR[r.review]} wrap="truncate">{r.review.padEnd(reviewWidth)}</Text>
                     </Box>
+                    {needsWidth > 0 && (
+                      <Box width={needsWidth} flexShrink={0}>
+                        <Text color={needsOnYou(r) ? 'red' : 'yellow'} wrap="truncate">
+                          {cut(needsText(r), needsWidth)}
+                        </Text>
+                      </Box>
+                    )}
                   </Box>
                   {noteRoom >= 12 && note(r) && (
                     // Starts at the row's right edge: the empty bridge over the card's padding and border is part of the

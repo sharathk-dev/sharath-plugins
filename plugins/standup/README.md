@@ -47,6 +47,10 @@ The server is detected from the tools it offers, with no configuration, the same
 - `mcp-atlassian` (`jira_search`)
 - any MCP tool whose name looks like a Jira search and takes `{jql}`
 
+## Only some repos (optional)
+
+By default /standup shows every repo your `gh` login can see. To keep it to some GitHub owners, for example only your company's orgs on a work laptop, set **Only these GitHub owners** (`owners`) in the `/plugin` config menu: orgs or users, comma separated (`my-company, my-team-org`). Case doesn't matter. The value is kept in your Claude Code settings on that machine, so plugin updates leave it in place.
+
 ## Requirements
 
 | Need | For |

@@ -4,18 +4,25 @@ A Claude Code plugin with one slash command: `/pr` shows your open GitHub PRs an
 
 ## /pr
 
-Your open PRs ("Mine") and PRs waiting on your review ("Waiting on you"), fetched with one GitHub GraphQL call through `gh`. Each row shows:
+Your open PRs and PRs waiting on your review, fetched with one GitHub GraphQL call through `gh`. The card groups your PRs by what they need:
 
-| Part | Meaning |
+- **Needs you**: a reply waiting on you, a merge conflict, failing CI, or an open PR whose Jira ticket is done.
+- **Waiting on others**: in review, nothing for you to do.
+- **Drafts**: your drafts, problems or not.
+- **Review requests**: other people's PRs waiting on your review.
+
+A stack of PRs stays together, filed by its root PR. Review threads count only threads a person started; bot reviews are left out. Every column has a header, ruled off; a column no PR uses is hidden. Each row shows:
+
+| Column | Meaning |
 |---|---|
-| `PR#n` | Clickable, opens the PR. Drafts are dimmed. |
-| repo, title | Review requests also show the author. |
-| Jira key | Clickable once the Jira site is known (see below). |
-| Jira status | Next to the key. Red when your open PR is on a Done issue. |
-| `resolved/total` | Review threads on your PRs. `●n` is how many wait on you (unresolved, last comment is someone else's). Hover the row to see who wrote last on each open thread (`2 open: bob 1, you 1`). |
-| `conflict` (red) | Your PR can't merge cleanly. Hover the row: "rebase on <base>" shows just right of the card, if the window has room. |
-| CI mark | `✓` passing, `✗` failing, `●` running. `✗3` means three checks failed; hover the row to see their names right of the card. |
-| Review state | Approved, Changes, Review or Draft. |
+| PR | `PR#n`, clickable, opens the PR. Drafts are dimmed. |
+| Repo, Title | Review requests also show the author. |
+| Jira | The issue key, clickable once the Jira site is known (see below), and its status. Red when your open PR is on a Done issue. |
+| CI | `✓` passing, `✗` failing, `●` running. `✗ 3` means three checks failed. |
+| Status | Approved, Changes, Review or Draft. |
+| Needs | What holds the PR, in words: `conflict`, `n unanswered` (threads whose last comment is someone else's), `n open` (threads waiting on the reviewer), `ticket closed`. Red when it's on you, yellow when it waits on others. Cut at 30 characters. |
+
+Hover a row for the details, in a small box right of the card when the window has room: the branch to rebase on, the failed checks by name, and who wrote last on each open thread (`2 open: bob 1, you 1`). Click the note to open the PR, or its Checks tab when only checks failed.
 
 Stacked PRs (base is not the default branch) are nested under the PR they build on. If that PR isn't listed, the row names its base branch.
 
@@ -30,6 +37,10 @@ The Jira server is detected from the tools it offers, with no configuration:
 - any MCP tool whose name looks like a Jira search and takes `{jql}`
 
 The key links to the issue once the site is known: from the Atlassian plugin's site list, or from the URL of the issues the server returns, so any of the servers above works.
+
+## Only some repos (optional)
+
+By default /pr shows every repo your `gh` login can see. To keep it to some GitHub owners, for example only your company's orgs on a work laptop, set **Only these GitHub owners** (`owners`) in the `/plugin` config menu: orgs or users, comma separated (`my-company, my-team-org`). Case doesn't matter. The value is kept in your Claude Code settings on that machine, so plugin updates leave it in place.
 
 ## Requirements
 
@@ -55,4 +66,3 @@ claude plugin validate plugins/pr-status
 - Matches a PR to an issue by the key in the title, then the branch name.
 - Lists the first 50 PRs in each section.
 
-Hover notes appear in a small box just right of the card, when the window has room for it. Click a note to open the PR.

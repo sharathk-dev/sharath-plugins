@@ -186,7 +186,7 @@ const ACTIVITY_QUERY = `query($from: DateTime!, $to: DateTime!, $merged: String!
     id login
     pullRequests(states: OPEN, first: 20, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { headRefName updatedAt repository { nameWithOwner } } }
     contributionsCollection(from: $from, to: $to) {
-      commitContributionsByRepository(maxRepositories: 10) { repository { nameWithOwner } contributions { totalCount } }
+      commitContributionsByRepository(maxRepositories: 25) { repository { nameWithOwner } contributions { totalCount } }
       pullRequestContributions(first: 30) { nodes { pullRequest { number title url createdAt headRefName repository { nameWithOwner } } } }
       pullRequestReviewContributions(first: 30) { nodes { occurredAt pullRequest { number title url repository { nameWithOwner } } } }
     }
@@ -220,15 +220,22 @@ type GitHub = { commits: CommitRepo[]; prs: PrItem[] }
 
 const shortRepo = (nameWithOwner: string) => nameWithOwner.split('/').pop() ?? nameWithOwner
 
-async function fetchGitHub($: EngineInterface, w: Win): Promise<GitHub> {
+// GitHub owners (orgs or users) to keep, from the `owners` setting: comma or space separated. Empty keeps every repo.
+export function ownersOf(raw: unknown): string[] {
+  return String(raw ?? '').split(/[\s,]+/).map(s => s.trim().toLowerCase()).filter(Boolean)
+}
+const keepOwner = (owners: string[], owner: string) => owners.length === 0 || owners.includes(owner.toLowerCase())
+
+async function fetchGitHub($: EngineInterface, w: Win, owners: string[] = []): Promise<GitHub> {
   const from = w.from.toISOString()
   const to = w.to.toISOString()
   const data = await graphql($, ACTIVITY_QUERY, { from, to, merged: `is:pr author:@me merged:${from}..${to}` })
   const cc = data?.viewer?.contributionsCollection
 
   const stamped: { at: number; item: PrItem }[] = []
+  const ownerOf = (nameWithOwner: unknown) => String(nameWithOwner ?? '').split('/')[0] ?? ''
   const add = (kind: PrItem['kind'], n: any, at: unknown) => {
-    if (!n?.number) return
+    if (!n?.number || !keepOwner(owners, ownerOf(n.repository?.nameWithOwner))) return
     stamped.push({
       at: Date.parse(String(at ?? '')) || 0,
       item: { kind, repo: shortRepo(String(n.repository?.nameWithOwner ?? '')), number: Number(n.number), url: String(n.url), title: String(n.title ?? '') },
@@ -247,7 +254,7 @@ async function fetchGitHub($: EngineInterface, w: Win): Promise<GitHub> {
 
   const commits: (CommitRepo & { full: string; latest: number })[] = (cc?.commitContributionsByRepository ?? [])
     .map((r: any) => ({ full: String(r.repository?.nameWithOwner ?? ''), repo: shortRepo(String(r.repository?.nameWithOwner ?? '')), count: Number(r.contributions?.totalCount ?? 0), messages: [] as string[], latest: 0 }))
-    .filter((r: CommitRepo) => r.count > 0)
+    .filter((r: CommitRepo & { full: string }) => r.count > 0 && keepOwner(owners, ownerOf(r.full)))
     .sort((a: CommitRepo, b: CommitRepo) => b.count - a.count)
 
   const branchesOf = (full: string): string[] => {
@@ -302,7 +309,8 @@ async function fetchJira($: EngineInterface, w: Win): Promise<JiraItem[] | null>
 
 const ISSUE_STATUS_COLOUR = colourFor
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const owners = ownersOf(options?.owners)
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'standup',
@@ -316,7 +324,7 @@ export const register: Register = on => {
     if ('error' in spec) return { text: spec.error }
     const w = windowFor(new Date(await $.clock.now()), spec)
     try {
-      const [gh, jira] = await Promise.all([fetchGitHub($, w), fetchJira($, w)])
+      const [gh, jira] = await Promise.all([fetchGitHub($, w, owners), fetchJira($, w)])
       const report: Report = { label: w.label, word: w.word, jiraDown: jira === null, commits: gh.commits, prs: gh.prs, jira: jira ?? [] }
       return { text: toText(report) }
     } catch (err) {

@@ -70,10 +70,11 @@ test('/pr lists my PRs and review requests with review, CI and issue key', async
     props: { command: 'pr', args: '', text: out ?? '', isErrored: false },
   })
   expect(await ui.find({ key: 'pr-web-7544' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Waiting on you/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Review requests/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Waiting on others/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /· alice/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '3/4' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: / ●1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '1 unanswered' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '2 open' })).toBeDefined()
   const drawn = JSON.stringify(await ui.drawn())
   expect(drawn).toContain('"color":"red"')
   await ui.press({ key: 'open-web-7544' })
@@ -115,7 +116,7 @@ test('/pr marks merge conflicts and names failing checks on my PRs only', async 
 
   const ui = await mount($, out ?? '', 260)
   expect(await ui.find({ type: 'Text', text: 'conflict' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '✗3' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '✗ 3' })).toBeDefined()
   expect(JSON.stringify(await ui.drawn())).toContain('"label":"rebase on develop · ✗ build, lint, a; b - c"')
   expect(await ui.find({ type: 'Text', text: /✗ x/ })).toBeUndefined()
   expect(JSON.stringify(await ui.drawn())).toMatch(/"key":"pr-web-5".*"position":"absolute","top":-1,"left":156[^}]*"display":"none"[^}]*\},"hover":\{"display":"flex"\}/)
@@ -139,7 +140,7 @@ test('/pr reads facts that hold brackets without spilling them into the title', 
   const ui = await mount($, out, 260)
   expect(await ui.find({ type: 'Text', text: /Add \(optional\) report/ })).toBeDefined()
   expect(JSON.stringify(await ui.drawn())).toContain('✗ AWS CodeBuild eu-west-1 (aeroparker-external-api)')
-  expect(await ui.find({ type: 'Text', text: '0/6' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^conflict · 6 open/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Closed (old)' })).toBeDefined()
   expect(JSON.stringify(await ui.drawn())).not.toContain('threads resol')
 })
@@ -217,7 +218,7 @@ test('/pr does not call Jira when no PR names an issue', async ($, on) => {
   expect(out).not.toContain('Jira')
 })
 
-test('/pr draws one left-aligned signals column, and none when no row has a signal', async ($, on) => {
+test('/pr shows open threads in Needs, and no CI column when no row has CI', async ($, on) => {
   mock.clock(on)
   on('tool.list', async () => tools('Read'))
   const bare = { nodes: [{ commit: { statusCheckRollup: null } }] }
@@ -227,13 +228,13 @@ test('/pr draws one left-aligned signals column, and none when no row has a sign
   ]))
   const { text: out } = await $.command.run(RUN)
   const ui = await mount($, out ?? '')
-  expect(await ui.find({ type: 'Text', text: '1/3' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '2 open' })).toBeDefined()
   const drawn = JSON.stringify(await ui.drawn())
   expect(drawn).not.toMatch(/[✓✗]/)
   expect(drawn).not.toContain('"justifyContent":"flex-end"')
 })
 
-test('/pr gives every row the same signals width, as wide as the longest signals text', async ($, on) => {
+test('/pr gives the Needs column one width on every row, as wide as the longest Needs text', async ($, on) => {
   mock.clock(on)
   on('tool.list', async () => tools('Read'))
   const bare = { nodes: [{ commit: { statusCheckRollup: null } }] }
@@ -243,18 +244,13 @@ test('/pr gives every row the same signals width, as wide as the longest signals
     node({ number: 3, title: 'Nothing', commits: bare }),
   ]))
   const { text: out } = await $.command.run(RUN)
-  const ui = await mount($, out ?? '')
-  const columns: any[] = []
-  const walk = (n: any) => {
-    if (n?.type === 'Box' && n.props?.gap === 2 && n.props?.flexShrink === 0) columns.push(n)
-    for (const c of Array.isArray(n?.children) ? n.children : []) walk(c)
-  }
-  walk(await ui.drawn())
-  expect(columns.map(c => c.props.width)).toEqual([8, 8, 8])
-  expect(columns.some(c => c.props.justifyContent === 'flex-end')).toBe(false)
+  const drawn = JSON.stringify(await (await mount($, out ?? '')).drawn())
+  // `1 unanswered` is the longest: the header and all three rows get its 12 columns.
+  expect(drawn.split('"width":12,"flexShrink":0').length - 1).toBe(4)
+  expect(drawn).not.toContain('"children":["CI"]')
 })
 
-test('/pr draws threads, conflict and CI together on one row', async ($, on) => {
+test('/pr puts a conflict and unanswered threads together in Needs', async ($, on) => {
   mock.clock(on)
   on('tool.list', async () => tools('Read'))
   on('process.run', async () => gh([
@@ -262,9 +258,7 @@ test('/pr draws threads, conflict and CI together on one row', async ($, on) => 
   ]))
   const { text: out } = await $.command.run(RUN)
   const busy = await mount($, out ?? '')
-  expect(await busy.find({ type: 'Text', text: '1/2' })).toBeDefined()
-  expect(await busy.find({ type: 'Text', text: / ●1/ })).toBeDefined()
-  expect(await busy.find({ type: 'Text', text: 'conflict' })).toBeDefined()
+  expect(await busy.find({ type: 'Text', text: 'conflict · 1 unanswered' })).toBeDefined()
   expect(await busy.find({ type: 'Text', text: '✓' })).toBeDefined()
 })
 
@@ -324,8 +318,77 @@ test('card style: magenta border, gradient title, review states coloured and lef
   expect(drawn).toContain('"borderColor":"magenta"')
   expect(drawn).not.toContain('"borderDimColor"')
   expect(drawn).toContain('"color":"#ff5fa2"},"children":["P"]')
-  const review = await ui.find({ type: 'Text', text: /^Review\s*$/ })
-  expect(review?.props?.color).toBe('magenta')
+  expect(drawn).toContain('{"color":"magenta","wrap":"truncate"},"children":["Review"]')
   expect((await ui.find({ type: 'Text', text: /^Draft\s*$/ }))?.props?.color).toBe('yellow')
   expect(await ui.find({ type: 'Text', text: /^\s+Draft$/ })).toBeUndefined()
+})
+
+test('the owners setting keeps only those owners\' PRs, any case', { options: { owners: 'Work' } }, async ($, on) => {
+  mock.clock(on)
+  on('tool.list', async () => tools('Read'))
+  on('process.run', async () => gh(
+    [node({ number: 1, title: 'Personal' }), node({ number: 2, title: 'Day job', url: 'https://github.com/work/svc/pull/2' })],
+    [node({ number: 3, title: 'Review me', url: 'https://github.com/work/svc/pull/3', author: { login: 'al' } })],
+  ))
+  const { text: out } = await $.command.run(RUN)
+  expect(out).toContain('PRs · 1 mine · 1 to review')
+  expect(out).toContain('Day job')
+  expect(out).not.toContain('Personal')
+})
+
+test('/pr counts only review threads a person started, not ones a bot started', async ($, on) => {
+  mock.clock(on)
+  on('tool.list', async () => tools('Read'))
+  const bot = (login: string, typename = 'Bot') => ({ isResolved: false, started: { nodes: [{ author: { __typename: typename, login } }] }, comments: { nodes: [{ author: { login } }] } })
+  on('process.run', async () => gh([
+    node({ number: 1, title: 'Reviewed', reviewThreads: { nodes: [thread(false, 'bob'), bot('copilot-pull-request-reviewer'), bot('review-bot[bot]', 'User')] } }),
+    node({ number: 2, title: 'Only bots', reviewThreads: { nodes: [bot('coderabbitai')] } }),
+  ]))
+  const { text: out } = await $.command.run(RUN)
+  expect(out).toContain('(Review · CI passing · 0/1 threads resolved · 1 waiting on you · open by bob 1) Reviewed')
+  expect(out).toContain('(Review · CI passing) Only bots')
+})
+
+test('/pr groups my PRs into Needs you, Waiting on others and Drafts, with headers only over used columns', async ($, on) => {
+  mock.clock(on)
+  on('tool.list', async () => tools('Read'))
+  const bare = { nodes: [{ commit: { statusCheckRollup: null } }] }
+  on('process.run', async () => gh([
+    node({ number: 1, title: 'Clean', commits: bare }),
+    node({ number: 2, title: 'Stuck', mergeable: 'CONFLICTING', commits: bare }),
+    node({ number: 3, title: 'Sketch', isDraft: true, mergeable: 'CONFLICTING', commits: bare }),
+  ], [node({ number: 9, title: 'Theirs', author: { login: 'al' }, commits: bare })]))
+  const { text: out } = await $.command.run(RUN)
+  expect(out).toContain('### Mine')
+  const drawn = JSON.stringify(await (await mount($, out ?? '')).drawn())
+  const at = (t: string) => drawn.indexOf(t)
+  expect(at('Needs you')).toBeLessThan(at('Stuck'))
+  expect(at('Stuck')).toBeLessThan(at('Waiting on others'))
+  expect(at('Waiting on others')).toBeLessThan(at('Clean'))
+  expect(at('Clean')).toBeLessThan(at('Drafts'))
+  expect(at('Drafts')).toBeLessThan(at('Sketch'))
+  expect(at('Sketch')).toBeLessThan(at('Review requests'))
+  expect(drawn).toContain('"children":["Needs"]')
+  expect(drawn).not.toContain('"children":["CI"]')
+
+  const quiet = JSON.stringify(await (await mount($, out!.replace(/ · conflict/g, ''))).drawn())
+  expect(quiet).not.toContain('"children":["Needs"]')
+  expect(quiet).not.toContain('Needs you')
+})
+
+test('/pr draws headers over every column, a rule, and Needs in words, red when on you', async ($, on) => {
+  mock.clock(on)
+  on('tool.list', async () => tools('Read'))
+  on('process.run', async () => gh([
+    node({ number: 7, title: 'Busy', mergeable: 'CONFLICTING', reviewThreads: { nodes: [thread(false, 'bob'), thread(false, 'bob'), thread(false, 'me'), thread(true, 'bob')] } }),
+    node({ number: 8, title: 'Calm', reviewThreads: { nodes: [thread(false, 'me')] } }),
+  ]))
+  const { text: out } = await $.command.run(RUN)
+  const ui = await mount($, out ?? '')
+  const drawn = JSON.stringify(await ui.drawn())
+  for (const h of ['PR', 'Repo', 'Title', 'CI', 'Status', 'Needs']) expect(drawn).toContain(`"children":["${h}"]`)
+  expect(drawn).toContain('─────')
+  // `conflict · 2 unanswered · 1 open` is past the 30-column cap, so it is cut; the hover note has it whole.
+  expect(drawn).toContain('{"color":"red","wrap":"truncate"},"children":["conflict · 2 unanswered · 1 o…"]')
+  expect(drawn).toContain('{"color":"yellow","wrap":"truncate"},"children":["1 open"]')
 })

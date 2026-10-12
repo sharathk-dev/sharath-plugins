@@ -1,10 +1,18 @@
 {
   "name": "pr-status",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "/pr shows your open PRs and review requests as a card in the chat: review threads, CI, conflicts, stacked PRs, Jira status",
   "types": "./types/index.d.ts",
   "author": {
     "name": "sharath",
     "url": "https://github.com/sharathk-dev"
+  },
+  "userConfig": {
+    "owners": {
+      "type": "string",
+      "title": "Only these GitHub owners",
+      "description": "Orgs or users whose repos /pr shows, comma separated (e.g. my-company, my-team-org). Empty shows every repo.",
+      "default": ""
+    }
   }
 }

@@ -372,3 +372,17 @@ test('the count never drops below the headlines shown, so "+N more" is never neg
   const ui = await mount($, text ?? '')
   expect(await ui.find({ type: 'Text', text: 'c · b · +1 more' })).toBeDefined()
 })
+
+test('the owners setting keeps only those owners\' repos, any case', { options: { owners: 'Work, other' } }, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('tool.list', async () => tools('Read'))
+  const act = activity()
+  act.viewer.contributionsCollection.commitContributionsByRepository.push({ repository: { nameWithOwner: 'work/svc' }, contributions: { totalCount: 3 } })
+  act.viewer.contributionsCollection.pullRequestContributions.nodes.push({ pullRequest: { ...pr(9, 'Work thing', 'svc'), url: 'https://github.com/work/svc/pull/9', repository: { nameWithOwner: 'work/svc' } } })
+  fakeGh(on, act)
+  const { text } = await $.command.run(RUN())
+  expect(text).toContain('- svc (')
+  expect(text).not.toMatch(/- (web|api) \(/)
+  expect(text).toContain('Work thing')
+  expect(text).not.toContain('github.com/me/')
+})
