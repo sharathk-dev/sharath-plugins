@@ -221,6 +221,40 @@ test('asks for the evidence view and merges pages by following nextPageToken', a
   expect(out).toContain('Jira · 2 open')
   expect(out).toContain('[KAN-11](https://x.atlassian.net/browse/KAN-11)')
   expect(out).toContain('[KAN-12](https://x.atlassian.net/browse/KAN-12)')
+  expect(out).not.toContain('more in Jira')
+  const ui = await $.ui.mount({
+    plugin: 'jira-tasks', surface: 'terminal', component: 'CommandOutput',
+    props: { command: 'jira', args: '', text: out ?? '', isErrored: false },
+  })
+  expect(await ui.find({ key: 'open-more' })).toBeUndefined()
+})
+
+test('links to the full search in Jira when the limit cuts the results off', async ($, on) => {
+  on('tool.list', async () => tools('mcp__a__searchJiraIssuesUsingJql'))
+  const page = (from: number, token: string) => ({
+    data: { nextPageToken: token, isLast: false, issues: Array.from({ length: 25 }, (_, i) => EVIDENCE(`KAN-${from + i}`, `Issue ${from + i}`)) },
+  })
+  on('mcp.call', async (_$, e) => {
+    if (e.tool === 'getAccessibleAtlassianResources') return text({ data: { resources: [{ cloudId: 'c1', url: 'https://x.atlassian.net' }] } })
+    return text(e.args.nextPageToken ? page(126, 'p3') : page(101, 'p2'))
+  })
+  const opened: string[][] = []
+  on('process.run', async (_$, e) => {
+    if (e.argv[0] === 'xdg-open') opened.push([...e.argv])
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as any
+  })
+  const { text: out } = await $.command.run(RUN)
+  const url = `https://x.atlassian.net/issues/?jql=${encodeURIComponent('assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC')}`
+  expect(out).toContain('Jira · 50+ open')
+  expect((out ?? '').split('\n').at(-1)).toBe(`[… more in Jira](<${url}>)`)
+
+  const ui = await $.ui.mount({
+    plugin: 'jira-tasks', surface: 'terminal', component: 'CommandOutput',
+    props: { command: 'jira', args: '', text: out ?? '', isErrored: false },
+  })
+  expect(await ui.find({ key: 'open-more' })).toBeDefined()
+  await ui.press({ key: 'open-more' })
+  expect(opened).toEqual([['xdg-open', url]])
 })
 
 test('says so when the Jira reply is cut off', async ($, on) => {

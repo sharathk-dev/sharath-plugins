@@ -11,6 +11,7 @@ Issues assigned to you that aren't done (`assignee = currentUser() AND statusCat
 - A chip per issue type: Story, Task, Epic, Bug, Subtask.
 - Subtasks are nested under their parent when the parent is also listed. Otherwise the row names its parent.
 - The key is a button that opens the issue in your browser.
+- When the 50-issue limit cuts the list off, a dim `… more in Jira →` line at the bottom opens the full search in your browser.
 - Long summaries end in "…".
 - Your open PRs whose title mentions the key show as a clickable `PR#n` (`PR#n +1` for more than one).
 

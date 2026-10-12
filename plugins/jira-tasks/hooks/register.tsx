@@ -163,7 +163,7 @@ function nest(tasks: Task[]): { top: Task[]; childrenOf: Map<string, Task[]> } {
 }
 
 // One JQL search on whichever Jira server is connected; resolves (and remembers) the Atlassian site when the server needs one.
-async function searchJira($: EngineInterface, jql: string, fields: string[], limit: number): Promise<Task[]> {
+async function searchJira($: EngineInterface, jql: string, fields: string[], limit: number): Promise<{ tasks: Task[]; more: boolean; site: string }> {
   const { server, adapter } = await detect($)
   let cloudId = await read($, cloud)
   let site = await read($, siteUrl)
@@ -178,17 +178,19 @@ async function searchJira($: EngineInterface, jql: string, fields: string[], lim
   }
   const issues: any[] = []
   let pageToken: string | undefined
+  let cutOff = false
   do {
     const size = adapter.paged ? Math.min(PAGE_SIZE, limit - issues.length) : limit
     const res = parse(await $.mcp.call(server, adapter.tool, adapter.args(jql, cloudId, fields, size, pageToken)))
     issues.push(...(res?.data?.issues ?? res?.issues ?? (Array.isArray(res) ? res : [])))
     const last = res?.data?.isLast ?? true
+    cutOff = adapter.paged ? res?.data?.isLast === false : issues.length >= limit
     pageToken = adapter.paged && !last && issues.length < limit ? res?.data?.nextPageToken : undefined
   } while (pageToken)
-  return issues.slice(0, limit).map(i => toTask(i, site))
+  return { tasks: issues.slice(0, limit).map(i => toTask(i, site)), more: cutOff, site }
 }
 
-function fetchTasks($: EngineInterface): Promise<Task[]> {
+function fetchTasks($: EngineInterface) {
   return searchJira($, JQL, TASK_FIELDS, 50)
 }
 
@@ -226,9 +228,9 @@ function prLines(t: Task, indent: string): string[] {
 
 // The row's text is plain markdown (what the transcript and the model see); the render hook below reads it
 // back to draw the card, so every /jira row keeps its own snapshot.
-function toMarkdown(tasks: Task[], at: Date): string {
+function toMarkdown(tasks: Task[], at: Date, moreUrl?: string): string {
   const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
-  const lines = [`Jira · ${tasks.length} open · ${time}`]
+  const lines = [`Jira · ${tasks.length}${moreUrl ? '+' : ''} open · ${time}`]
   const { top, childrenOf } = nest(tasks)
   const link = (t: Task) => (t.url ? `[${t.key}](${t.url})` : t.key)
   for (const [status, list] of group(top)) {
@@ -248,6 +250,7 @@ function toMarkdown(tasks: Task[], at: Date): string {
       }
     }
   }
+  if (moreUrl) lines.push(`[… more in Jira](<${moreUrl}>)`)
   return lines.join('\n')
 }
 
@@ -265,14 +268,20 @@ type Row = {
 }
 
 // Tolerates a prefix before the title (the transcript may show the plugin's name first).
-function fromMarkdown(text: string): { count: string; time: string; rows: Row[] } | undefined {
+function fromMarkdown(text: string): { count: string; time: string; rows: Row[]; moreUrl?: string } | undefined {
   const lines = text.split('\n')
-  const head = lines[0]?.match(/Jira · (\d+) open · (\S+)/)
+  const head = lines[0]?.match(/Jira · (\d+\+?) open · (\S+)/)
   if (!head) return undefined
   const rows: Row[] = []
   let status = ''
   let category: Category = ''
+  let moreUrl: string | undefined
   for (const line of lines.slice(1)) {
+    const more = line.match(/^\[… more in Jira\]\(<(.+)>\)$/)
+    if (more) {
+      moreUrl = more[1]
+      continue
+    }
     if (line.startsWith('### ')) {
       const h = line.slice(4).match(/^(.*?)(?: \((To Do|In Progress|Done)\))?$/)!
       status = h[1]!
@@ -303,7 +312,7 @@ function fromMarkdown(text: string): { count: string; time: string; rows: Row[] 
       rows.push(row)
     }
   }
-  return { count: head[1]!, time: head[2]!, rows }
+  return { count: head[1]!, time: head[2]!, rows, moreUrl }
 }
 
 // The chip left of each row: the issue type's symbol and name on Jira's colour for it.
@@ -345,8 +354,9 @@ export const register: Register = on => {
 
   on('command.run', { command: 'jira' }, async $ => {
     try {
-      const [tasks, prs] = await Promise.all([fetchTasks($), fetchPullRequests($)])
-      return { text: toMarkdown(attachPullRequests(tasks, prs), new Date()) }
+      const [{ tasks, more, site }, prs] = await Promise.all([fetchTasks($), fetchPullRequests($)])
+      const moreUrl = more && site ? `${site}/issues/?jql=${encodeURIComponent(JQL)}` : undefined
+      return { text: toMarkdown(attachPullRequests(tasks, prs), new Date(), moreUrl) }
     } catch (err) {
       return { text: `Couldn't load Jira tasks: ${err instanceof Error ? err.message : String(err)}` }
     }
@@ -433,6 +443,11 @@ export const register: Register = on => {
             </Box>
           )
         })}
+        {card.moreUrl && (
+          <Box key="more" marginTop={1}>
+            <Button key="open-more" plain dimColor label="… more in Jira →" hover={{ underline: true }} onPress={() => openInBrowser($, card.moreUrl!)} />
+          </Box>
+        )}
       </Box>
     )
   })
