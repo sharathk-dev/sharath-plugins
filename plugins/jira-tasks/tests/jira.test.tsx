@@ -74,7 +74,7 @@ test('colours and orders custom board statuses by their Jira category', async ($
   on('tool.list', async () => tools('mcp__a__searchJiraIssuesUsingJql'))
   on('mcp.call', async (_$, e) => {
     if (e.tool === 'getAccessibleAtlassianResources') return text({ data: { resources: [{ cloudId: 'c1', url: 'https://x.atlassian.net' }] } })
-    expect(e.args.view).toBe('full')
+    expect(e.args.view).toBe('evidence')
     return text({ data: { issues: [
       { key: 'K-1', fields: { summary: 'Triage me', status: st('Triage', 'new') } },
       { key: 'K-2', fields: { summary: 'Building', status: st('Doing', 'indeterminate') } },
@@ -190,4 +190,42 @@ test('reports a server failure as text', async ($, on) => {
   on('mcp.call', async () => ({ value: { content: [{ type: 'text' as const, text: 'Unauthorized' }], isError: true } }))
   const { text: out } = await $.command.run(RUN)
   expect(out).toBe("Couldn't load Jira tasks: Unauthorized")
+})
+
+const EVIDENCE = (key: string, summary: string) => ({
+  id: key.slice(4),
+  key,
+  fields: {
+    summary,
+    status: { name: 'In Review', statusCategory: { name: 'In Progress' } },
+    priority: { name: 'Medium' },
+    issuetype: { id: '10007', name: 'Subtask' },
+    parent: { key: 'KAN-7', fields: { summary: 'Parent' } },
+  },
+})
+
+test('asks for the evidence view and merges pages by following nextPageToken', async ($, on) => {
+  on('tool.list', async () => tools('mcp__a__searchJiraIssuesUsingJql'))
+  const searches: Record<string, unknown>[] = []
+  on('mcp.call', async (_$, e) => {
+    if (e.tool === 'getAccessibleAtlassianResources') return text({ data: { resources: [{ cloudId: 'c1', url: 'https://x.atlassian.net' }] } })
+    searches.push(e.args)
+    if (!e.args.nextPageToken) return text({ data: { nextPageToken: 'p2', isLast: false, issues: [EVIDENCE('KAN-11', 'First')] } })
+    return text({ data: { isLast: true, issues: [EVIDENCE('KAN-12', 'Second')] } })
+  })
+  const { text: out } = await $.command.run(RUN)
+  expect(searches).toHaveLength(2)
+  expect(searches[0]).toMatchObject({ view: 'evidence', maxResults: 25 })
+  expect(searches[0]).not.toHaveProperty('nextPageToken')
+  expect(searches[1]).toMatchObject({ view: 'evidence', nextPageToken: 'p2' })
+  expect(out).toContain('Jira · 2 open')
+  expect(out).toContain('[KAN-11](https://x.atlassian.net/browse/KAN-11)')
+  expect(out).toContain('[KAN-12](https://x.atlassian.net/browse/KAN-12)')
+})
+
+test('says so when the Jira reply is cut off', async ($, on) => {
+  on('tool.list', async () => tools('mcp__a__searchJiraIssuesUsingJql'))
+  on('mcp.call', async () => ({ value: { content: [{ type: 'text' as const, text: '{"data":{"issues":[{"key":"KAN-1","fi' }], isError: false } }))
+  const { text: out } = await $.command.run(RUN)
+  expect(out).toBe("Couldn't load Jira tasks: the Jira reply was cut off or not JSON (37 chars)")
 })

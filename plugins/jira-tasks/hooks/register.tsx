@@ -69,13 +69,19 @@ function rank(status: string, known: Category): number {
 // Search tools of known Jira MCP servers, and the arguments each takes. A server is recognised by the tool it
 // offers, not its name, so a company build of either server is picked up too; failing both, any MCP tool named
 // like a Jira search (`jira_search_issues`, `searchJira`) is tried with just `{ jql }`.
-type Adapter = { tool: string; args: (jql: string, cloudId: string, fields: string[], limit: number) => Record<string, unknown>; needsCloudId: boolean }
+type Adapter = {
+  tool: string
+  args: (jql: string, cloudId: string, fields: string[], limit: number, pageToken?: string) => Record<string, unknown>
+  needsCloudId: boolean
+  paged?: boolean
+}
 const ADAPTERS: Adapter[] = [
   // Atlassian's own remote MCP (the `atlassian` plugin).
   {
     tool: 'searchJiraIssuesUsingJql',
     needsCloudId: true,
-    args: (jql, cloudId, fields, limit) => ({ cloudId, jql, fields, maxResults: limit, view: 'full' }),
+    paged: true,
+    args: (jql, cloudId, fields, limit, pageToken) => ({ cloudId, jql, fields, maxResults: limit, view: 'evidence', ...(pageToken ? { nextPageToken: pageToken } : {}) }),
   },
   // sooperset/mcp-atlassian, common for self-hosted Jira Server / Data Center.
   { tool: 'jira_search', needsCloudId: false, args: (jql, _cloudId, fields, limit) => ({ jql, fields: fields.join(','), limit }) },
@@ -84,6 +90,8 @@ const ADAPTERS: Adapter[] = [
 type Source = { server: string; adapter: Adapter }
 
 const TASK_FIELDS = ['summary', 'status', 'issuetype', 'priority', 'parent']
+
+const PAGE_SIZE = 25
 
 const LOOKS_LIKE_JIRA_SEARCH = /jira.*search|search.*jira/i
 
@@ -107,7 +115,11 @@ async function detect($: EngineInterface): Promise<Source> {
 function parse(result: { content: { type: string; text?: string }[]; isError: boolean }): any {
   const text = result.content.find(block => block.type === 'text')?.text ?? ''
   if (result.isError) throw new Error(text || 'the Jira server reported an error')
-  return JSON.parse(text)
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error(`the Jira reply was cut off or not JSON (${text.length} chars)`)
+  }
 }
 
 function group(tasks: Task[]): [string, Task[]][] {
@@ -164,9 +176,16 @@ async function searchJira($: EngineInterface, jql: string, fields: string[], lim
     await update($, cloud, () => cloudId)
     await update($, siteUrl, () => site)
   }
-  const res = parse(await $.mcp.call(server, adapter.tool, adapter.args(jql, cloudId, fields, limit)))
-  const issues: any[] = res?.data?.issues ?? res?.issues ?? (Array.isArray(res) ? res : [])
-  return issues.map(i => toTask(i, site))
+  const issues: any[] = []
+  let pageToken: string | undefined
+  do {
+    const size = adapter.paged ? Math.min(PAGE_SIZE, limit - issues.length) : limit
+    const res = parse(await $.mcp.call(server, adapter.tool, adapter.args(jql, cloudId, fields, size, pageToken)))
+    issues.push(...(res?.data?.issues ?? res?.issues ?? (Array.isArray(res) ? res : [])))
+    const last = res?.data?.isLast ?? true
+    pageToken = adapter.paged && !last && issues.length < limit ? res?.data?.nextPageToken : undefined
+  } while (pageToken)
+  return issues.slice(0, limit).map(i => toTask(i, site))
 }
 
 function fetchTasks($: EngineInterface): Promise<Task[]> {
