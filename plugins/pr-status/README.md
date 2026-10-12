@@ -12,10 +12,9 @@ Your open PRs ("Mine") and PRs waiting on your review ("Waiting on you"), fetche
 | repo, title | Review requests also show the author. |
 | Jira key | Clickable once the Jira site is known (see below). |
 | Jira status | Next to the key. Red when your open PR is on a Done issue. |
-| `resolved/total` | Review threads on your PRs. `●n` is how many wait on you (unresolved, last comment is someone else's). |
-| `⚠ conflict` | Your PR can't merge cleanly. |
-| CI mark | `✓` passing, `✗` failing, `●` running. |
-| `✗ name · name` | Names of the failing checks, on a line below. |
+| `resolved/total` | Review threads on your PRs. `●n` is how many wait on you (unresolved, last comment is someone else's). Hover the row to see who wrote last on each open thread (`2 open: bob 1, you 1`). |
+| `conflict` (red) | Your PR can't merge cleanly. Hover the row: "rebase on <base>" shows just right of the card, if the window has room. |
+| CI mark | `✓` passing, `✗` failing, `●` running. `✗3` means three checks failed; hover the row to see their names right of the card. |
 | Review state | Approved, Changes, Review or Draft. |
 
 Stacked PRs (base is not the default branch) are nested under the PR they build on. If that PR isn't listed, the row names its base branch.
@@ -55,3 +54,5 @@ claude plugin validate plugins/pr-status
 
 - Matches a PR to an issue by the key in the title, then the branch name.
 - Lists the first 50 PRs in each section.
+
+Hover notes appear in a small box just right of the card, when the window has room for it. Click a note to open the PR.

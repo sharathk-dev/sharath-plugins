@@ -3,7 +3,9 @@ import type { EngineInterface, Register } from 'claude-code'
 import { draftOf, fromText, isEmpty, jiraJql, parseArgs, toText, totalCommits, windowFor } from './standup'
 import type { CommitRepo, JiraItem, PrItem, Report, Win } from './standup'
 
+// Cards fill the window up to CARD_MAX; with no window size known, CARD_WIDTH.
 const CARD_WIDTH = 100
+const CARD_MAX = 160
 
 const GRADIENT = [
   [255, 95, 162],
@@ -326,7 +328,7 @@ export const register: Register = on => {
     const report = fromText(e.props.text)
     if (!report) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
-    const width = Math.min(CARD_WIDTH, e.viewport?.columns ?? CARD_WIDTH)
+    const width = Math.min(CARD_MAX, e.viewport?.columns ?? CARD_WIDTH)
     const inner = width - 4
     const cut = (text: string, n: number) => (text.length <= n ? text : `${text.slice(0, Math.max(1, n - 1)).trimEnd()}…`)
     const repoWidth = Math.min(18, Math.max(0, ...report.commits.map(c => c.repo.length), ...report.prs.map(p => p.repo.length)))

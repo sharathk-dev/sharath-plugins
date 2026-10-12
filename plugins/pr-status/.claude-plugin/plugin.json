@@ -1,6 +1,6 @@
 {
   "name": "pr-status",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "/pr shows your open PRs and review requests as a card in the chat: review threads, CI, conflicts, stacked PRs, Jira status",
   "types": "./types/index.d.ts",
   "author": {

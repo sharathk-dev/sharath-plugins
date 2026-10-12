@@ -1,6 +1,6 @@
 {
   "name": "jira-tasks",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "/jira shows your open Jira tasks as a card in the chat, with their open PRs",
   "types": "./types/index.d.ts",
   "author": {

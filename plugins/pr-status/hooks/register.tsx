@@ -1,7 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+// Cards fill the window up to CARD_MAX; with no window size known, CARD_WIDTH.
 const CARD_WIDTH = 100
+const CARD_MAX = 160
+// Columns kept free right of the card for the hover note, while the card can still be at least CARD_MIN wide.
+const NOTE_ROOM = 34
+const CARD_MIN = 80
 
 const GRADIENT = [
   [255, 95, 162],
@@ -170,12 +175,13 @@ fragment threads on PullRequest {
 type Review = 'Approved' | 'Changes' | 'Review' | 'Draft'
 type Ci = 'passing' | 'failing' | 'running' | ''
 // `waiting`: unresolved threads whose last comment is someone else's, so the next move is yours.
-type Threads = { resolved: number; total: number; waiting: number }
+// `by`: who wrote the last comment on each open thread, most first, as `bob 2, you 1`.
+type Threads = { resolved: number; total: number; waiting: number; by?: string }
 // `conflict` and `failing` are only known for your own PRs; `jira` only when the Jira lookup answered.
 type JiraStatus = { status: string; category: Category }
 type PrRow = {
   repo: string; number: number; url: string; title: string; review: Review; ci: Ci
-  key?: string; author?: string; threads?: Threads; conflict?: boolean; failing?: string[]; jira?: JiraStatus
+  key?: string; author?: string; threads?: Threads; conflict?: boolean; base?: string; failing?: string[]; jira?: JiraStatus
   // Stacked PRs (yours only): `depth` under the PR it is based on (`onPr`), or, when that PR isn't listed, the base branch.
   depth?: number; onPr?: number; onBranch?: string
 }
@@ -194,7 +200,15 @@ function threadsOf(n: any, me: string): Threads | undefined {
     const last = t.comments?.nodes?.[0]?.author?.login
     return last && last !== me
   }).length
-  return { resolved: list.length - open.length, total: list.length, waiting }
+  const counts = new Map<string, number>()
+  for (const t of open) {
+    const last = t.comments?.nodes?.[0]?.author?.login
+    if (!last) continue
+    const name = last === me ? 'you' : last
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  const by = [...counts].sort((a, b) => b[1] - a[1]).map(([name, n]) => `${name} ${n}`).join(', ')
+  return { resolved: list.length - open.length, total: list.length, waiting, by: by || undefined }
 }
 
 // Names of the checks that failed on the last commit, once each, in the order GitHub lists them. Names travel in
@@ -231,6 +245,7 @@ function toPrRow(n: any, withAuthor: boolean, me = ''): PrRow {
     author: withAuthor ? n.author?.login : undefined,
     threads: withAuthor ? undefined : threadsOf(n, me),
     conflict: !withAuthor && n.mergeable === 'CONFLICTING' ? true : undefined,
+    base: !withAuthor && n.mergeable === 'CONFLICTING' && n.baseRefName ? String(n.baseRefName) : undefined,
     failing: withAuthor ? undefined : failingChecks(n),
   }
 }
@@ -323,11 +338,12 @@ function prBoardToMarkdown(board: PrBoard, at: Date, jiraDown = false): string {
     const t = r.threads
     const facts = [
       r.review,
-      r.conflict ? 'conflict' : '',
+      r.conflict ? (r.base ? `conflict with ${r.base}` : 'conflict') : '',
       r.ci ? `CI ${r.ci}` : '',
       r.failing?.length ? `failing: ${r.failing.join(', ')}` : '',
       t ? `${t.resolved}/${t.total} threads resolved` : '',
       t?.waiting ? `${t.waiting} waiting on you` : '',
+      t?.by ? `open by ${t.by}` : '',
       r.onPr ? `on #${r.onPr}` : r.onBranch ? `on ${r.onBranch}` : '',
       r.key ?? '',
       r.jira ? `jira: ${r.jira.status.replace(/ · /g, ' - ')}/${r.jira.category}` : '',
@@ -342,6 +358,17 @@ function prBoardToMarkdown(board: PrBoard, at: Date, jiraDown = false): string {
   return lines.join('\n')
 }
 
+// Check names and Jira statuses can hold brackets, e.g. `AWS CodeBuild eu-west-1 (job)`, so the facts end at the
+// `) ` that closes the opening bracket, not the first one.
+function splitFacts(rest: string): { facts: string; title: string } | undefined {
+  let depth = 1
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '(') depth++
+    else if (rest[i] === ')' && --depth === 0 && rest[i + 1] === ' ') return { facts: rest.slice(0, i), title: rest.slice(i + 2) }
+  }
+  return undefined
+}
+
 function prBoardFromMarkdown(text: string): { head: string; jiraDown: boolean; sections: [string, PrRow[]][] } | undefined {
   const lines = text.split('\n')
   const head = lines[0]?.match(/PRs · (\d+ mine · \d+ to review · \S+)( · Jira unavailable)?/)
@@ -352,13 +379,19 @@ function prBoardFromMarkdown(text: string): { head: string; jiraDown: boolean; s
       sections.push([l.slice(4), []])
       continue
     }
-    const m = l.match(/^( *)- \[([^\]]*)#(\d+)\]\(([^)]+)\) \(([^)]*)\) (.*)$/)
+    const m = l.match(/^( *)- \[([^\]]*)#(\d+)\]\(([^)]+)\) \((.*)$/)
     if (!m || sections.length === 0) continue
-    const row: PrRow = { repo: m[2]!, number: Number(m[3]), url: m[4]!, title: m[6]!, review: 'Review', ci: '' }
+    const split = splitFacts(m[5]!)
+    if (!split) continue
+    const row: PrRow = { repo: m[2]!, number: Number(m[3]), url: m[4]!, title: split.title, review: 'Review', ci: '' }
     if (m[1]) row.depth = Math.floor(m[1].length / 2)
-    for (const fact of m[5]!.split(' · ')) {
+    for (const fact of split.facts.split(' · ')) {
       if (['Approved', 'Changes', 'Review', 'Draft'].includes(fact)) row.review = fact as Review
       else if (fact === 'conflict') row.conflict = true
+      else if (fact.startsWith('conflict with ')) {
+        row.conflict = true
+        row.base = fact.slice(14)
+      }
       else if (fact.startsWith('CI ')) row.ci = fact.slice(3) as Ci
       else if (fact.startsWith('failing: ')) row.failing = fact.slice(9).split(', ')
       else if (fact.startsWith('jira: ')) {
@@ -370,6 +403,7 @@ function prBoardFromMarkdown(text: string): { head: string; jiraDown: boolean; s
         const [resolved, total] = fact.split(' ')[0]!.split('/').map(Number)
         row.threads = { resolved: resolved!, total: total!, waiting: row.threads?.waiting ?? 0 }
       } else if (/^\d+ waiting on you$/.test(fact) && row.threads) row.threads.waiting = parseInt(fact, 10)
+      else if (fact.startsWith('open by ') && row.threads) row.threads.by = fact.slice(8)
       else if (/^on #\d+$/.test(fact)) row.onPr = parseInt(fact.slice(4), 10)
       else if (fact.startsWith('on ')) row.onBranch = fact.slice(3)
       else if (ISSUE_KEY.test(fact)) row.key = fact
@@ -412,8 +446,6 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const site = await read($, siteUrl)
     const rows = board.sections.flatMap(([, list]) => list)
-    // Terminal cell width: `⚠` is drawn 2 wide by some terminals, so count it as 2.
-    const cells = (text: string) => text.length + (text.match(/⚠/g)?.length ?? 0)
     const numWidth = Math.max(0, ...rows.map(r => `PR#${r.number}`.length))
     const repoWidth = Math.min(18, Math.max(0, ...rows.map(r => r.repo.length)))
     const keyWidth = Math.max(0, ...rows.map(r => r.key?.length ?? 0))
@@ -422,13 +454,15 @@ export const register: Register = on => {
     const statusWidth = Math.max(0, ...rows.map(r => (r.jira ? jiraCut(r.jira.status).length : 0)))
     const keyColumn = keyWidth + (statusWidth ? statusWidth + 1 : 0)
     const reviewWidth = Math.max(0, ...rows.map(r => r.review.length))
-    const conflictMark = '⚠ conflict'
+    const conflictMark = 'conflict'
     const fraction = (t: Threads) => `${t.resolved}/${t.total}`
     const waitingMark = (t: Threads) => (t.waiting ? ` ●${t.waiting}` : '')
+    // A failing row counts its failed checks next to the mark; their names show on hover.
+    const ciMark = (r: PrRow) => CI_MARK[r.ci].mark + (r.failing?.length ? r.failing.length : '')
     // One signals column (threads, conflict, CI) as wide as the busiest row, left-aligned just before the review label;
     // its parts are two spaces apart. No row with a signal, no column.
     const signalLength = (r: PrRow) => {
-      const parts = [r.threads ? fraction(r.threads).length + waitingMark(r.threads).length : 0, r.conflict ? cells(conflictMark) : 0, r.ci ? 1 : 0].filter(Boolean)
+      const parts = [r.threads ? fraction(r.threads).length + waitingMark(r.threads).length : 0, r.conflict ? conflictMark.length : 0, r.ci ? ciMark(r).length : 0].filter(Boolean)
       return parts.reduce((sum, n) => sum + n, 0) + 2 * Math.max(0, parts.length - 1)
     }
     const signalsWidth = Math.max(0, ...rows.map(signalLength))
@@ -446,11 +480,21 @@ export const register: Register = on => {
     const suffix = (r: PrRow) => (r.author ? ` · ${r.author}` : r.onBranch ? ` on ${r.onBranch}` : '')
     const columns = 4 + (keyColumn ? 1 : 0) + (signalsWidth ? 1 : 0)
     const fixed = numWidth + repoWidth + keyColumn + signalsWidth + reviewWidth + (columns - 1)
-    // Same fixed width as the other card (/jira and /pr), so they line up; narrower only on a narrow window.
-    const width = Math.min(CARD_WIDTH, e.viewport?.columns ?? CARD_WIDTH)
+    // Hovering a row shows why it's blocked on the same line, just right of the card, in the space the card leaves.
+    // An overlay inside the card doesn't blank what's beneath it, so the note stays outside. No space, no note.
+    // Clicking the note opens the PR's conversation, where the failed checks and open threads are.
+    const openThreads = (t?: Threads) => (t && t.resolved < t.total ? `${t.total - t.resolved} open${t.by ? `: ${t.by}` : ''}` : '')
+    const note = (r: PrRow) =>
+      [r.conflict ? `rebase on ${r.base ?? 'base'}` : '', r.failing?.length ? `✗ ${r.failing.join(', ')}` : '', openThreads(r.threads)]
+        .filter(Boolean)
+        .join(' · ')
+    const window = e.viewport?.columns
+    const reserve = rows.some(r => note(r)) ? NOTE_ROOM + 5 : 0
+    const width = window === undefined ? CARD_WIDTH : Math.min(CARD_MAX, Math.max(Math.min(CARD_MIN, window), window - reserve))
     const room = Math.max(8, width - 4 - fixed - 1)
-    // The failing-checks line starts under the title column.
-    const indent = numWidth + 1 + repoWidth + 1
+    // The note is a small bordered box two columns right of the card, its middle line on the hovered row.
+    const noteRoom = (window ?? 0) - width - 5
+    const noteBox = (text: string) => Math.min(noteRoom, text.length + 4)
     const cut = (text: string, n: number) => (text.length <= n ? text : `${text.slice(0, n - 1).trimEnd()}…`)
 
     return (
@@ -526,21 +570,35 @@ export const register: Register = on => {
                         )}
                         {r.conflict && (
                           <Box flexShrink={0}>
-                            <Text color="red">{conflictMark}</Text>
+                            <Text color="red" bold wrap="truncate">{conflictMark}</Text>
                           </Box>
                         )}
-                        {r.ci && <Text color={ci.colour}>{ci.mark}</Text>}
+                        {r.ci && <Text color={ci.colour}>{ciMark(r)}</Text>}
                       </Box>
                     )}
                     <Box width={reviewWidth} flexShrink={0}>
                       <Text color={REVIEW_COLOUR[r.review]} wrap="truncate">{r.review.padEnd(reviewWidth)}</Text>
                     </Box>
                   </Box>
-                  {r.failing && r.failing.length > 0 && (
-                    <Box paddingLeft={indent}>
-                      <Text color="red" dimColor wrap="truncate">
-                        {cut(`✗ ${r.failing.join(' · ')}`, Math.max(8, width - 4 - indent))}
-                      </Text>
+                  {noteRoom >= 12 && note(r) && (
+                    // Starts at the row's right edge: the empty bridge over the card's padding and border is part of the
+                    // row, so the pointer can cross to the note and click it without the note closing.
+                    <Box position="absolute" top={-1} left={width - 4} flexDirection="row" display="none" hover={{ display: 'flex' }}>
+                      <Box width={4} />
+                      <Box
+                        width={noteBox(note(r))}
+                        borderStyle="round"
+                        borderColor={r.conflict || r.failing?.length ? 'red' : 'yellow'}
+                        paddingX={1}
+                      >
+                        <Button
+                          key={`note-${r.repo}-${r.number}`}
+                          plain
+                          label={cut(note(r), noteBox(note(r)) - 4)}
+                          hover={{ underline: true }}
+                          onPress={() => openInBrowser($, r.failing?.length && !r.conflict ? `${r.url}/checks` : r.url)}
+                        />
+                      </Box>
                     </Box>
                   )}
                 </Box>

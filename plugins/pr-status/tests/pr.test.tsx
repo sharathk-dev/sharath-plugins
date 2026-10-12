@@ -11,8 +11,12 @@ const JIRA_TOOLS = ['mcp__a__searchJiraIssuesUsingJql', 'mcp__a__getAccessibleAt
 const gh = (mine: unknown[], review: unknown[] = []) =>
   ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ data: { viewer: { login: 'me' }, mine: { nodes: mine }, review: { nodes: review } } }) } }) as any
 
-const mount = ($: any, text: string) =>
-  $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'CommandOutput', props: { command: 'pr', args: '', text, isErrored: false } })
+const mount = ($: any, text: string, columns?: number) =>
+  $.ui.mount({
+    plugin: 'pr-status', surface: 'terminal', component: 'CommandOutput',
+    props: { command: 'pr', args: '', text, isErrored: false },
+    ...(columns ? { viewport: { columns, rows: 50 } } : {}),
+  })
 
 const jiraAnswer = (issues: unknown[]) => ({
   value: { content: [{ type: 'text' as const, text: JSON.stringify({ data: { resources: [{ cloudId: 'c1', url: 'https://x.atlassian.net' }], issues } }) }], isError: false },
@@ -54,9 +58,9 @@ test('/pr lists my PRs and review requests with review, CI and issue key', async
   expect((out ?? '').replace(/\d\d:\d\d/, 'HH:MM')).toBe([
     'PRs · 3 mine · 1 to review · HH:MM · Jira unavailable',
     '### Mine',
-    '- [web#7544](https://github.com/o/web/pull/7544) (Approved · CI passing · 3/4 threads resolved · 1 waiting on you · INT-352) INT-352 | Drive WhatsApp banner',
+    '- [web#7544](https://github.com/o/web/pull/7544) (Approved · CI passing · 3/4 threads resolved · 1 waiting on you · open by bob 1 · INT-352) INT-352 | Drive WhatsApp banner',
     '- [api-reports#19](https://github.com/o/r/pull/1) (Draft · CI failing · AER-64) Use model jars',
-    '- [web#674](https://github.com/o/r/pull/1) (Changes · 0/2 threads resolved · AER-64) AER-64: Consume models',
+    '- [web#674](https://github.com/o/r/pull/1) (Changes · 0/2 threads resolved · open by you 2 · AER-64) AER-64: Consume models',
     '### Waiting on you',
     '- [web#12](https://github.com/o/r/pull/1) (Review · CI running · by alice) Session hardening',
   ].join('\n'))
@@ -74,6 +78,14 @@ test('/pr lists my PRs and review requests with review, CI and issue key', async
   expect(drawn).toContain('"color":"red"')
   await ui.press({ key: 'open-web-7544' })
   expect(opened).toEqual(['https://github.com/o/web/pull/7544'])
+
+  // Open threads: the hover note says who wrote last on each, and clicking it opens the PR.
+  const wide = await mount($, out ?? '', 200)
+  const wideDrawn = JSON.stringify(await wide.drawn())
+  expect(wideDrawn).toContain('"label":"1 open: bob 1"')
+  expect(wideDrawn).toContain('"label":"2 open: you 2"')
+  await wide.press({ key: 'note-web-7544' })
+  expect(opened).toEqual(['https://github.com/o/web/pull/7544', 'https://github.com/o/web/pull/7544'])
 })
 
 test('/pr says why when gh fails', async ($, on) => {
@@ -87,7 +99,7 @@ test('/pr marks merge conflicts and names failing checks on my PRs only', async 
   on('tool.list', async () => tools('Read'))
   const rollup = (state: string, nodes: unknown[]) => ({ nodes: [{ commit: { statusCheckRollup: { state, contexts: { nodes } } } }] })
   on('process.run', async () => gh([
-    node({ number: 5, title: 'Fix it', mergeable: 'CONFLICTING', commits: rollup('FAILURE', [
+    node({ number: 5, title: 'Fix it', mergeable: 'CONFLICTING', baseRefName: 'develop', commits: rollup('FAILURE', [
       { __typename: 'CheckRun', name: 'build', conclusion: 'FAILURE' },
       { __typename: 'CheckRun', name: 'docs', conclusion: 'SUCCESS' },
       { __typename: 'StatusContext', context: 'lint', state: 'ERROR' },
@@ -97,16 +109,39 @@ test('/pr marks merge conflicts and names failing checks on my PRs only', async 
     node({ number: 6, title: 'Fine', mergeable: 'MERGEABLE' }),
   ], [node({ number: 9, title: 'Theirs', mergeable: 'CONFLICTING', author: { login: 'al' }, commits: rollup('FAILURE', [{ __typename: 'CheckRun', name: 'x', conclusion: 'FAILURE' }]) })]))
   const { text: out } = await $.command.run(RUN)
-  expect(out).toContain('(Review · conflict · CI failing · failing: build, lint, a; b - c) Fix it')
+  expect(out).toContain('(Review · conflict with develop · CI failing · failing: build, lint, a; b - c) Fix it')
   expect(out).toContain('(Review · CI passing) Fine')
   expect(out).toContain('(Review · CI failing · by al) Theirs')
 
-  const ui = await mount($, out ?? '')
-  expect(await ui.find({ type: 'Text', text: '⚠ conflict' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '✗ build · lint · a; b - c' })).toBeDefined()
+  const ui = await mount($, out ?? '', 260)
+  expect(await ui.find({ type: 'Text', text: 'conflict' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '✗3' })).toBeDefined()
+  expect(JSON.stringify(await ui.drawn())).toContain('"label":"rebase on develop · ✗ build, lint, a; b - c"')
   expect(await ui.find({ type: 'Text', text: /✗ x/ })).toBeUndefined()
-  const drawn = JSON.stringify(await ui.drawn())
-  expect(drawn.split('⚠ conflict')).toHaveLength(2)
+  expect(JSON.stringify(await ui.drawn())).toMatch(/"key":"pr-web-5".*"position":"absolute","top":-1,"left":156[^}]*"display":"none"[^}]*\},"hover":\{"display":"flex"\}/)
+
+  const narrow = await mount($, out ?? '', 85)
+  expect(JSON.stringify(await narrow.drawn())).not.toContain('rebase on')
+
+  // A wide window gives the card all but the note's room, up to its cap.
+  const card = async (columns: number) => (await (await mount($, out ?? '', columns)).drawn() as any).props.width
+  expect(await card(140)).toBe(101)
+  expect(await card(260)).toBe(160)
+  expect(await card(85)).toBe(80)
+})
+
+test('/pr reads facts that hold brackets without spilling them into the title', async $ => {
+  const out = [
+    'PRs · 1 mine · 0 to review · 22:22',
+    '### Mine',
+    '- [aeroparker-extern#202](https://x/202) (Draft · conflict · CI failing · failing: AWS CodeBuild eu-west-1 (aeroparker-external-api) · 0/6 threads resolved · AER-64 · jira: Closed (old)/Done) Add (optional) report',
+  ].join('\n')
+  const ui = await mount($, out, 260)
+  expect(await ui.find({ type: 'Text', text: /Add \(optional\) report/ })).toBeDefined()
+  expect(JSON.stringify(await ui.drawn())).toContain('✗ AWS CodeBuild eu-west-1 (aeroparker-external-api)')
+  expect(await ui.find({ type: 'Text', text: '0/6' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Closed (old)' })).toBeDefined()
+  expect(JSON.stringify(await ui.drawn())).not.toContain('threads resol')
 })
 
 test('/pr shows Jira statuses next to keys, red when my open PR is on a Done ticket', async ($, on) => {
@@ -215,7 +250,7 @@ test('/pr gives every row the same signals width, as wide as the longest signals
     for (const c of Array.isArray(n?.children) ? n.children : []) walk(c)
   }
   walk(await ui.drawn())
-  expect(columns.map(c => c.props.width)).toEqual([11, 11, 11])
+  expect(columns.map(c => c.props.width)).toEqual([8, 8, 8])
   expect(columns.some(c => c.props.justifyContent === 'flex-end')).toBe(false)
 })
 
@@ -229,7 +264,7 @@ test('/pr draws threads, conflict and CI together on one row', async ($, on) => 
   const busy = await mount($, out ?? '')
   expect(await busy.find({ type: 'Text', text: '1/2' })).toBeDefined()
   expect(await busy.find({ type: 'Text', text: / ●1/ })).toBeDefined()
-  expect(await busy.find({ type: 'Text', text: '⚠ conflict' })).toBeDefined()
+  expect(await busy.find({ type: 'Text', text: 'conflict' })).toBeDefined()
   expect(await busy.find({ type: 'Text', text: '✓' })).toBeDefined()
 })
 
